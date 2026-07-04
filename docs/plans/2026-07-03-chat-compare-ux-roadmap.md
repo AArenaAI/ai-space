@@ -611,38 +611,22 @@ conversationId -> activeStreams
 
 ## 建议下一轮执行顺序
 
-### 第一轮：P1 发送 / 停止 / 恢复的视觉一致性
+### 第一轮：P3 Activity / 来源入口继续减噪
 
 **状态:** 🟡 当前优先执行
 
 任务：
 
-1. 普通 Chat 与 Compare 共用更稳定的 pending / generating 状态外壳。
-2. 固定 assistant pending 首帧高度，避免 reasoning 首 token 前后跳动。
-3. Stop / resume / route switch 后，避免重复 pending 和状态文案混乱。
-4. Compare 一列完成、一列生成中时，按钮 / 状态文案更明确。
-5. 补充或扩展 live probe，采样 pending height、old row signature、duplicate ids、DOM remount。
-
-**原因:** 用户最直接感知的是“发出去之后稳不稳”，优先做视觉一致性，而不是继续堆架构。
-
----
-
-### 第二轮：P3 Activity / 来源入口继续减噪
-
-**状态:** 🟡 当前优先执行
-
-任务：
-
-1. 聚合卡展开状态在当前面板生命周期内记忆。
-2. 来源域名过多时，默认只展示前 N 个域名，支持“显示全部 / 收起”。
-3. 工具调用、文件检索、网页来源统一入口文案和视觉层级。
-4. 保持普通 Chat 一个入口、Compare 每列一个入口，不新增冗余箭头。
+1. 聚合卡展开状态在当前面板生命周期内记忆。✅
+2. 来源域名过多时，默认只展示前 N 个域名，支持“显示全部 / 收起”。✅
+3. 工具调用、文件检索、网页来源统一入口文案和视觉层级。✅
+4. 保持普通 Chat 一个入口、Compare 每列一个入口，不新增冗余箭头。✅
 
 **原因:** 来源是高频阅读入口，优化应以“少打扰、可展开、可回到原状态”为主。
 
 ---
 
-### 第三轮：P3 长消息性能和阅读定位
+### 第二轮：P3 长消息性能和阅读定位
 
 **状态:** 🟡 当前优先执行
 
@@ -659,10 +643,12 @@ conversationId -> activeStreams
 
 ### 已完成 / 不再作为下一轮主任务
 
+- ✅ P1 发送 / 停止 / 恢复视觉一致性：pending shell、Compare loading 稳定高度、P1 state consistency live probe 已完成。
 - ✅ Compare 模型持久化：已静默 PATCH 当前会话，并有 live 回归覆盖刷新与新一轮 payload。
 - ✅ 视觉稳定 live probe：已新增 5 轮 mixed rich old-row stability stress，覆盖旧消息 DOM/height/text/remount。
 - ✅ Sidebar hook 化：`useChatSidebarHistory()` 已抽出，桌面 / 移动已共用；剩余是 fixture 测试与 optimistic pipeline。
 - ✅ block anchor 第一版：已支持 `anchorMessageId + anchorBlockId + anchorOffset` 恢复阅读位置。
+- ⏬ Compare 移动端体验：按用户要求优先级排到最后，暂不混入 P3 桌面阅读体验。
 
 ---
 

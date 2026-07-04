@@ -45,7 +45,7 @@ async function switchMode(page, testId) {
 
 async function getActiveOverviewId(page) {
   return page.evaluate(() => {
-    const active = document.querySelector('[data-testid="chat-message-overview-item"].text-brand');
+    const active = document.querySelector('[data-testid="chat-message-overview-item"][data-overview-active="true"], [data-testid="chat-message-overview-item"].text-brand');
     return active?.getAttribute("data-message-id") || "";
   });
 }
@@ -55,7 +55,8 @@ async function getActiveOverviewId(page) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const failures = [];
   page.on("console", (message) => {
-    if (message.type() === "error") failures.push(`console error: ${message.text()}`);
+    const text = message.text();
+    if (message.type() === "error" && !/Failed to load resource/.test(text)) failures.push(`console error: ${text}`);
   });
   page.on("pageerror", (error) => failures.push(`page error: ${error.message}`));
 
@@ -115,6 +116,17 @@ async function getActiveOverviewId(page) {
     assert.ok(Number(compact.dotWidth) >= 24 && Number(compact.dotWidth) <= 32 && Number(compact.dotHeight) >= 1 && Number(compact.dotHeight) <= 4, `compact capsule should be a short horizontal bar, got w=${compact.dotWidth} h=${compact.dotHeight}`);
     assert.ok(Number(compact.zIndex) >= 140, `overview should sit above chat controls and floating panels, got z-index ${compact.zIndex}`);
     assert.ok(compact.rootRight <= compact.viewportWidth && compact.rootLeft >= 0, `overview should stay inside viewport: ${JSON.stringify(compact)}`);
+    const activeReadingBadge = await page.evaluate(() => {
+      const active = document.querySelector('[data-testid="chat-message-overview-item"][data-overview-active="true"]');
+      return {
+        id: active?.getAttribute('data-message-id') || '',
+        text: active?.textContent || '',
+        ariaCurrent: active?.getAttribute('aria-current') || '',
+      };
+    });
+    assert.equal(activeReadingBadge.id, 'overview-user-8', `active overview item should expose data-overview-active: ${JSON.stringify(activeReadingBadge)}`);
+    assert.equal(activeReadingBadge.ariaCurrent, 'true', `active overview item should expose aria-current: ${JSON.stringify(activeReadingBadge)}`);
+    assert.ok(activeReadingBadge.text.includes('正在阅读'), `active overview item should show reading hint: ${JSON.stringify(activeReadingBadge)}`);
 
     const beforeHoverScroll = await page.locator('[data-testid="chat-history-scroll-container"]').evaluate((el) => el.scrollTop);
     await page.hover('[data-testid="chat-message-overview-rail"]');

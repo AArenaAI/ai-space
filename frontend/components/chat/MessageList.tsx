@@ -254,6 +254,7 @@ function MessageList({
   const overviewBottomLockUntilRef = useRef(0);
   const userOverviewRafRef = useRef<number>(0);
   const userOverviewMessagesRef = useRef<{ id: string; label: string }[]>([]);
+  const previousOverviewLatestIdRef = useRef<string | null>(null);
   const previousAllVisibleMessagesRef = useRef<Message[]>([]);
   const historyPrependUntilRef = useRef(0);
   const openedConversationBottomKeyRef = useRef("");
@@ -1283,9 +1284,17 @@ function MessageList({
 
   userOverviewMessagesRef.current = userOverviewMessages;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (userOverviewMessages.length === 0) return;
-    setActiveOverviewMessageId((current) => current ?? userOverviewMessages[userOverviewMessages.length - 1]?.id ?? null);
+    const latestId = userOverviewMessages[userOverviewMessages.length - 1]?.id ?? null;
+    const previousLatestId = previousOverviewLatestIdRef.current;
+    const validIds = new Set(userOverviewMessages.map((item) => item.id));
+    setActiveOverviewMessageId((current) => {
+      if (!current || !validIds.has(current)) return latestId;
+      if (atBottomRef.current || current === previousLatestId) return latestId;
+      return current;
+    });
+    previousOverviewLatestIdRef.current = latestId;
   }, [userOverviewMessages]);
 
   const overviewItems = useMemo<ChatMessageOverviewItem[]>(() => {

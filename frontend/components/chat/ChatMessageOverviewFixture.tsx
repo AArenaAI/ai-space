@@ -43,6 +43,7 @@ export default function ChatMessageOverviewFixture() {
   const messages = mode === "single" ? singleTurnMessages : mode === "many" ? manyMessages : allMessages;
   const isCompare = mode === "compare";
   const compareModels = useMemo(() => isCompare ? ["deepseek-chat", "gpt-fixture"] : [], [isCompare]);
+  const conversationId = mode === "many" ? 2040 : mode === "single" ? 2001 : mode === "compare" ? 2002 : 2000;
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-message-overview-fixture" data-mode={mode}>
@@ -59,7 +60,7 @@ export default function ChatMessageOverviewFixture() {
           messages={messages}
           isLoading={false}
           models={models}
-          conversationId={2000}
+          conversationId={conversationId}
           isCompare={isCompare}
           compareModels={compareModels}
           onSelectModeChange={(mode === "select") ? () => {} : undefined}

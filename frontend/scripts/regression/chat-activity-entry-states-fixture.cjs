@@ -27,6 +27,13 @@ const baseMessages = [
     id: 'failed-sources', role: 'assistant', model: 'fixture-model', content: '上游模型请求失败，但搜索已经完成。', createdAt: Date.now() - 4000, completedAt: Date.now() - 1000, phase: 'failed', serverGenerationStatus: 'failed',
     searchSources: [{ title: 'Failure Source', url: 'https://example.com/failure', description: 'failure' }], searchSourcesCount: 1, statusTimeline: [{ id: 'web_search:completed', kind: 'web_search', status: 'completed', startedAt: Date.now() - 2500, endedAt: Date.now() - 2200, count: 1 }, { id: 'waiting_provider:failed', kind: 'waiting_provider', status: 'failed', startedAt: Date.now() - 2000, endedAt: Date.now() - 1000 }],
   },
+  {
+    id: 'dense-sources-files', role: 'assistant', model: 'fixture-model', content: '多来源和文件的回答', reasoningContent: '这里是多来源回答的简短思考。', createdAt: Date.now() - 5000, completedAt: Date.now() - 1000,
+    files: [{ public_id: 'file-1', filename: 'report.pdf', type: 'pdf' }, { public_id: 'file-2', filename: 'notes.md', type: 'text' }],
+    searchSources: Array.from({ length: 11 }, (_, index) => ({ title: `Dense Source ${index + 1}`, url: `https://domain-${index + 1}.example.com/path`, description: `dense-${index + 1}` })),
+    searchSourcesCount: 11,
+    statusTimeline: [{ id: 'file_search:completed', kind: 'file_search', status: 'completed', startedAt: Date.now() - 3500, endedAt: Date.now() - 3300 }, { id: 'web_search:completed', kind: 'web_search', status: 'completed', startedAt: Date.now() - 3000, endedAt: Date.now() - 2200, count: 11 }, { id: 'reasoning:completed', kind: 'reasoning', status: 'completed', startedAt: Date.now() - 2000, endedAt: Date.now() - 1600 }],
+  },
 ];
 
 (async () => {
@@ -54,8 +61,24 @@ const baseMessages = [
       const panel = document.querySelector('[data-chat-activity-panel="true"]');
       const title = panel?.getAttribute('data-chat-activity-title') || '';
       const text = panel?.textContent || '';
-      return { title, hasSources: text.includes('参考来源'), text };
+      const summaryChips = Array.from(panel?.querySelectorAll('[data-chat-activity-summary-chip]') || []).map((chip) => ({
+        kind: chip.getAttribute('data-chat-activity-summary-chip') || '',
+        text: chip.textContent || '',
+      }));
+      const visibleGroups = Array.from(panel?.querySelectorAll('[data-chat-source-group]') || []).map((group) => ({
+        host: group.getAttribute('data-chat-source-group') || '',
+        open: group.getAttribute('data-source-group-open') || '',
+      }));
+      return { title, hasSources: text.includes('参考来源'), text, summaryChips, visibleGroups };
     });
+    if (row.id === 'dense-sources-files') {
+      await page.locator('[data-chat-source-group="domain-1.example.com"]').first().click();
+      await page.waitForTimeout(120);
+      panels[row.id].afterFirstToggle = await page.evaluate(() => document.querySelector('[data-chat-source-group="domain-1.example.com"]')?.getAttribute('data-source-group-open') || '');
+      await page.locator('button').filter({ hasText: /显示全部来源域名/ }).first().click();
+      await page.waitForTimeout(120);
+      panels[row.id].afterShowAllCount = await page.locator('[data-chat-source-group]').count();
+    }
     await page.locator('[data-fixture-close]').click({ timeout: 5000 });
     await page.waitForSelector('[data-chat-activity-panel="true"]', { state: 'detached', timeout: 10000 }).catch(() => {});
   }
@@ -80,6 +103,13 @@ const baseMessages = [
       && panels['failed-sources']?.hasSources === true
       && panels['failed-sources']?.text.includes('搜索完成')
       && panels['failed-sources']?.text.includes('模型生成失败')
+      && panels['dense-sources-files']?.summaryChips?.some((chip) => chip.kind === 'process' && /过程/.test(chip.text))
+      && panels['dense-sources-files']?.summaryChips?.some((chip) => chip.kind === 'sources' && /11/.test(chip.text))
+      && panels['dense-sources-files']?.summaryChips?.some((chip) => chip.kind === 'files' && /2/.test(chip.text))
+      && panels['dense-sources-files']?.visibleGroups?.length === 8
+      && panels['dense-sources-files']?.text.includes('显示全部来源域名 · 还有 3 个')
+      && panels['dense-sources-files']?.afterFirstToggle === 'true'
+      && panels['dense-sources-files']?.afterShowAllCount === 11
       && pageErrors.length === 0,
     rows,
     panels,

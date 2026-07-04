@@ -250,12 +250,14 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
                   className={cn(
                     "group/item flex min-h-9 w-full shrink-0 items-center justify-between gap-3 rounded-xl px-2 text-left outline-none transition-colors duration-150 hover:bg-surface-card/70 focus-visible:ring-2 focus-visible:ring-brand/35",
                     item.active
-                      ? "text-brand"
+                      ? "bg-brand/5 text-brand"
                       : "text-text-secondary hover:text-text-primary"
                   )}
                   style={wheelTextStyle}
                   data-testid="chat-message-overview-item"
                   data-message-id={item.id}
+                  data-overview-active={item.active ? "true" : "false"}
+                  aria-current={item.active ? "true" : undefined}
                   aria-label={t("chat.overview.jumpToUserMessage", {
                     label: item.label,
                   })}
@@ -263,6 +265,11 @@ const ChatMessageOverview = memo(function ChatMessageOverview({
                   <span className="min-w-0 flex-1 truncate text-xs leading-9">
                     {item.label}
                   </span>
+                  {item.active && (
+                    <span className="hidden shrink-0 rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-brand/90 sm:inline-flex">
+                      正在阅读
+                    </span>
+                  )}
                   <span
                     className={cn(
                       "h-[3px] shrink-0 rounded-full transition-all duration-300",

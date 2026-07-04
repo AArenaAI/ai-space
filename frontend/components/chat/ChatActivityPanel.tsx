@@ -186,6 +186,18 @@ export default function ChatActivityPanel({
     sourceCount: sources.length || inferredSourceCount,
     timeline,
   });
+  const processSummaryLabel = active
+    ? "进行中"
+    : timeline.some((step) => step.status === "failed")
+      ? "有失败"
+      : timeline.some((step) => step.status === "stopped")
+        ? "已停止"
+        : "已完成";
+  const activitySummaryItems = [
+    { kind: "process", label: `过程 · ${timeline.length || 1} · ${processSummaryLabel}`, icon: CheckCircle },
+    ...(sources.length > 0 ? [{ kind: "sources", label: `来源 · ${sources.length}${sourceGroups.length > 1 ? ` / ${sourceGroups.length} 域名` : ""}`, icon: Globe }] : []),
+    ...(files.length > 0 ? [{ kind: "files", label: `文件 · ${files.length}`, icon: FileText }] : []),
+  ];
 
   const timelineStartAt = timeline[0]?.startedAt || message.generationStartedAt || message.createdAt;
   const panelClassName = variant === "docked"
@@ -196,7 +208,7 @@ export default function ChatActivityPanel({
 
   return (
     <aside className={panelClassName} data-chat-activity-panel="true" data-chat-activity-variant={variant} data-chat-activity-owner={ownerLabel || undefined} data-chat-activity-title={panelTitle}>
-      <div className="mb-5 flex items-center justify-between gap-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-base font-semibold text-text-primary">{panelTitle}</div>
           <div className="mt-0.5 truncate text-sm text-text-tertiary">{ownerLabel ? `${ownerLabel} · ` : ""}{model?.name || message.model || "AI"}</div>
@@ -204,6 +216,22 @@ export default function ChatActivityPanel({
         <button type="button" onClick={onClose} className="rounded-full p-1.5 text-text-tertiary hover:bg-surface-card hover:text-text-primary" aria-label="Close activity panel">
           <X className="h-4 w-4" />
         </button>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-1.5" data-chat-activity-summary="true" aria-label="Activity summary">
+        {activitySummaryItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <span
+              key={item.kind}
+              data-chat-activity-summary-chip={item.kind}
+              className="inline-flex items-center gap-1.5 rounded-full border border-surface-border/70 bg-surface-card/55 px-2.5 py-1 text-[11px] font-medium text-text-secondary"
+            >
+              <Icon className="h-3.5 w-3.5 text-text-tertiary" />
+              {item.label}
+            </span>
+          );
+        })}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-chat-activity-scroll="true">
@@ -291,6 +319,7 @@ export default function ChatActivityPanel({
                     key={group.host}
                     className="group rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card"
                     open={isExpanded}
+                    data-chat-source-group={group.host}
                     onToggle={(event) => {
                       if (!expandable) return;
                       const open = event.currentTarget.open;
