@@ -17,6 +17,15 @@ export interface AuthSessionSnapshot {
   user: AuthSessionUser;
 }
 
+async function parseAuthSessionResponse(res: Response, errorPrefix: string): Promise<AuthSessionSnapshot | null> {
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`${errorPrefix}:${res.status}`);
+
+  const data = await res.json();
+  if (!data?.user) return null;
+  return { token: data.token, user: data.user };
+}
+
 export async function fetchAuthSession(): Promise<AuthSessionSnapshot | null> {
   const res = await fetch("/api/auth/session", {
     method: "GET",
@@ -24,12 +33,17 @@ export async function fetchAuthSession(): Promise<AuthSessionSnapshot | null> {
     headers: { Accept: "application/json" },
   });
 
-  if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`auth_session_failed:${res.status}`);
+  return parseAuthSessionResponse(res, "auth_session_failed");
+}
 
-  const data = await res.json();
-  if (!data?.user) return null;
-  return { token: data.token, user: data.user };
+export async function refreshAuthSession(): Promise<AuthSessionSnapshot | null> {
+  const res = await fetch("/api/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+  });
+
+  return parseAuthSessionResponse(res, "auth_refresh_failed");
 }
 
 export function storeAuthUserSnapshot(snapshot: AuthSessionSnapshot | AuthSessionUser) {

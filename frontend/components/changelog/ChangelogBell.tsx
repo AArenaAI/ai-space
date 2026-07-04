@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Bell, X, CheckCircle, ExternalLink, Pin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api/client";
 
 interface Changelog {
   id: number;
@@ -38,7 +39,7 @@ export function ChangelogBell() {
 
   const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await fetch("/api/changelogs/unread-count");
+      const res = await apiFetch("/changelogs/unread-count");
       if (res.ok) {
         const data = await res.json();
         setUnreadCount(data.count || 0);
@@ -51,7 +52,7 @@ export function ChangelogBell() {
   const fetchChangelogs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/changelogs?page=1&page_size=20");
+      const res = await apiFetch("/changelogs?page=1&page_size=20");
       if (res.ok) {
         const data = await res.json();
         setChangelogs(data.changelogs || []);
@@ -72,7 +73,7 @@ export function ChangelogBell() {
     setOpen(true);
     fetchChangelogs();
     // 标记全部已读
-    fetch("/api/changelogs/read-all", { method: "POST" }).then(() => {
+    apiFetch("/changelogs/read-all", { method: "POST" }).then(() => {
       setUnreadCount(0);
     });
   };

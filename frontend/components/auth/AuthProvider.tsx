@@ -1,12 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   AUTH_CHANGED_EVENT,
   AUTH_READY_EVENT,
   ensureAuthSession,
   logoutBrowserSession,
   readAuthState,
+  refreshBrowserSession,
   type AuthStateSnapshot,
 } from "@/lib/auth/state";
 
@@ -16,21 +17,35 @@ interface AuthContextValue extends AuthStateSnapshot {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const SESSION_KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000;
+const SESSION_FOCUS_REFRESH_MIN_GAP_MS = 60 * 1000;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [snapshot, setSnapshot] = useState<AuthStateSnapshot>(() => readAuthState());
+  const lastKeepAliveAtRef = useRef(0);
 
   const sync = useCallback(() => {
     setSnapshot(readAuthState());
   }, []);
 
   const refreshSession = useCallback(async () => {
-    await ensureAuthSession({ force: true });
+    await refreshBrowserSession({ preserveOnMissing: true });
     sync();
   }, [sync]);
 
   const logout = useCallback(async () => {
     await logoutBrowserSession();
+    sync();
+  }, [sync]);
+
+  const keepSessionAlive = useCallback(async (reason: "interval" | "focus" | "visible") => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    const state = readAuthState();
+    if (!state.user && !state.token) return;
+    const now = Date.now();
+    if (reason !== "interval" && now - lastKeepAliveAtRef.current < SESSION_FOCUS_REFRESH_MIN_GAP_MS) return;
+    lastKeepAliveAtRef.current = now;
+    await refreshBrowserSession({ preserveOnMissing: true }).catch(() => null);
     sync();
   }, [sync]);
 
@@ -48,6 +63,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", sync);
     };
   }, [sync]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void keepSessionAlive("interval");
+    }, SESSION_KEEPALIVE_INTERVAL_MS);
+
+    const handleFocus = () => {
+      void keepSessionAlive("focus");
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void keepSessionAlive("visible");
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [keepSessionAlive]);
 
   const value = useMemo<AuthContextValue>(() => ({
     ...snapshot,

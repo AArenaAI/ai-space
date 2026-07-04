@@ -1,5 +1,5 @@
 import { clearGuestId, getGuestId } from "@/lib/guestId";
-import { clearAuthSnapshot, fetchAuthSession, storeAuthUserSnapshot, type AuthSessionSnapshot, type AuthSessionUser } from "./session";
+import { clearAuthSnapshot, fetchAuthSession, refreshAuthSession, storeAuthUserSnapshot, type AuthSessionSnapshot, type AuthSessionUser } from "./session";
 
 export type AuthStatus = "loading" | "authenticated" | "anonymous";
 
@@ -15,6 +15,7 @@ export const AUTH_STATE_CHANGED_EVENT = "auth-state-changed";
 export const AUTH_READY_EVENT = "auth-ready";
 
 let sessionProbePromise: Promise<AuthSessionSnapshot | null> | null = null;
+let sessionRefreshPromise: Promise<AuthSessionSnapshot | null> | null = null;
 let sessionProbeFinished = false;
 let currentSession: AuthSessionSnapshot | null = null;
 
@@ -25,6 +26,15 @@ function safeParseUser(raw: string | null): AuthSessionUser | null {
   } catch {
     return null;
   }
+}
+
+function hasLocalAuthSnapshot() {
+  return Boolean(
+    localStorage.getItem("token") ||
+      localStorage.getItem("user") ||
+      localStorage.getItem("admin_token") ||
+      localStorage.getItem("admin_user")
+  );
 }
 
 export function readAuthState(): AuthStateSnapshot {
@@ -87,11 +97,12 @@ export function markAuthReady() {
 
 export function resetAuthProbeForTests() {
   sessionProbePromise = null;
+  sessionRefreshPromise = null;
   sessionProbeFinished = false;
   currentSession = null;
 }
 
-export function ensureAuthSession(options: { force?: boolean } = {}): Promise<AuthSessionSnapshot | null> {
+export function ensureAuthSession(options: { force?: boolean; preserveOnMissing?: boolean } = {}): Promise<AuthSessionSnapshot | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
   if (!options.force && sessionProbePromise) return sessionProbePromise;
 
@@ -101,7 +112,7 @@ export function ensureAuthSession(options: { force?: boolean } = {}): Promise<Au
         applyAuthSession(session);
         return session;
       }
-      if (localStorage.getItem("token") || localStorage.getItem("user") || localStorage.getItem("admin_token") || localStorage.getItem("admin_user")) {
+      if (!options.preserveOnMissing && hasLocalAuthSnapshot()) {
         clearBrowserAuthState();
       } else {
         getGuestId();
@@ -119,9 +130,37 @@ export function ensureAuthSession(options: { force?: boolean } = {}): Promise<Au
   return sessionProbePromise;
 }
 
+export function refreshBrowserSession(options: { preserveOnMissing?: boolean } = {}): Promise<AuthSessionSnapshot | null> {
+  if (typeof window === "undefined") return Promise.resolve(null);
+  if (!sessionRefreshPromise) {
+    sessionRefreshPromise = refreshAuthSession()
+      .then(async (session) => {
+        if (session) {
+          applyAuthSession(session);
+          return session;
+        }
+        // Rotation races can make /refresh fail while /session is still valid.
+        const restored = await ensureAuthSession({ force: true, preserveOnMissing: true }).catch(() => null);
+        if (restored?.token) return restored;
+        if (!options.preserveOnMissing) clearBrowserAuthState();
+        return null;
+      })
+      .catch(async () => {
+        const restored = await ensureAuthSession({ force: true, preserveOnMissing: true }).catch(() => null);
+        return restored?.token ? restored : null;
+      })
+      .finally(() => {
+        sessionRefreshPromise = null;
+        markAuthReady();
+      });
+  }
+  return sessionRefreshPromise;
+}
+
 export async function logoutBrowserSession() {
   await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
   clearBrowserAuthState();
   sessionProbePromise = Promise.resolve(null);
+  sessionRefreshPromise = null;
   sessionProbeFinished = true;
 }
