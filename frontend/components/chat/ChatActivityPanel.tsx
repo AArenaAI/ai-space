@@ -13,6 +13,8 @@ import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import { groupSearchSourcesByHost, normalizeSearchSources } from "@/lib/searchSources";
 import { apiFetch } from "@/lib/api/client";
 
+const COLLAPSED_SOURCE_GROUP_LIMIT = 8;
+
 function statusIcon(step: ChatStatusTimelineStep) {
   if (step.status === "failed") return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
   if (step.status === "completed") return <CheckCircle className="h-3.5 w-3.5 text-emerald-500/85" />;
@@ -135,6 +137,8 @@ export default function ChatActivityPanel({
 }) {
   const { t } = useI18n();
   const [reasoningOpen, setReasoningOpen] = useState(true);
+  const [expandedSourceGroups, setExpandedSourceGroups] = useState<Set<string>>(() => new Set());
+  const [showAllSourceGroups, setShowAllSourceGroups] = useState(false);
   const [snapshotTimeline, setSnapshotTimeline] = useState<ChatStatusTimelineStep[] | undefined>();
   const realtime = useMessageRealtime(message?.id || "", Boolean(message));
   useEffect(() => {
@@ -165,6 +169,8 @@ export default function ChatActivityPanel({
     .map((step) => step.kind === "web_search" && !step.count && inferredSourceCount ? { ...step, count: inferredSourceCount } : step)
     .filter((step) => !isLowSignalCompletedActivityStep(step));
   const files = message.files || [];
+  const visibleSourceGroups = showAllSourceGroups ? sourceGroups : sourceGroups.slice(0, COLLAPSED_SOURCE_GROUP_LIMIT);
+  const hiddenSourceGroupCount = Math.max(0, sourceGroups.length - visibleSourceGroups.length);
   const active = !runtimeState.terminal && !((runtimeState.completedAt) || runtimeState.stopped || runtimeState.errorCode);
   const smoothReasoning = useSmoothStreaming(runtimeState.reasoningContent, active, message.id ? `${message.id}:activity-reasoning` : undefined);
   const reasoning = (active ? smoothReasoning : runtimeState.reasoningContent).trim();
@@ -269,20 +275,40 @@ export default function ChatActivityPanel({
 
         {sources.length > 0 && (
           <section>
-            <div className="mb-2 text-sm font-semibold text-text-secondary">参考来源 · {sources.length}</div>
+            <div className="mb-2 flex items-center justify-between gap-2 text-sm font-semibold text-text-secondary">
+              <span>参考来源 · {sources.length}</span>
+              {sourceGroups.length > 1 && <span className="text-[11px] font-normal text-text-tertiary">按域名聚合 · {sourceGroups.length}</span>}
+            </div>
             <div className="space-y-2">
-              {sourceGroups.slice(0, 12).map((group) => {
+              {visibleSourceGroups.map((group) => {
                 const sourceMeta = group.organization === group.host ? group.host : `${group.organization} · ${group.host}`;
                 const primarySource = group.sources[0];
                 const title = group.sources.length > 1 ? `${group.host} · ${group.sources.length}` : (primarySource.title || group.organization);
+                const expandable = group.sources.length > 1;
+                const isExpanded = expandedSourceGroups.has(group.host) || !expandable;
                 return (
-                  <details key={group.host} className="group rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card" open={group.sources.length === 1 ? undefined : false}>
+                  <details
+                    key={group.host}
+                    className="group rounded-xl bg-surface-card/60 px-2.5 py-2 text-sm hover:bg-surface-card"
+                    open={isExpanded}
+                    onToggle={(event) => {
+                      if (!expandable) return;
+                      const open = event.currentTarget.open;
+                      setExpandedSourceGroups((current) => {
+                        const next = new Set(current);
+                        if (open) next.add(group.host);
+                        else next.delete(group.host);
+                        return next;
+                      });
+                    }}
+                    data-source-group-open={isExpanded ? "true" : "false"}
+                  >
                     <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                       <div className="flex min-w-0 items-center justify-between gap-2">
                         <div className="truncate font-medium text-text-secondary">{title}</div>
-                        {group.sources.length > 1 && (
+                        {expandable && (
                           <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-text-tertiary">
-                            展开
+                            {isExpanded ? "收起" : "展开"}
                             <ChevronDown className="h-3.5 w-3.5 -rotate-90 transition-transform group-open:rotate-0" />
                           </span>
                         )}
@@ -299,6 +325,24 @@ export default function ChatActivityPanel({
                   </details>
                 );
               })}
+              {hiddenSourceGroupCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllSourceGroups(true)}
+                  className="w-full rounded-xl border border-dashed border-surface-border/80 px-3 py-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
+                >
+                  显示全部来源域名 · 还有 {hiddenSourceGroupCount} 个
+                </button>
+              )}
+              {showAllSourceGroups && sourceGroups.length > COLLAPSED_SOURCE_GROUP_LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllSourceGroups(false)}
+                  className="w-full rounded-xl px-3 py-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-secondary"
+                >
+                  收起到前 {COLLAPSED_SOURCE_GROUP_LIMIT} 个域名
+                </button>
+              )}
             </div>
           </section>
         )}

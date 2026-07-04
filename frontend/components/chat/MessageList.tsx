@@ -512,14 +512,31 @@ function MessageList({
       || (typeof savedScroll.anchorBlockIndex === "number" ? row?.querySelectorAll<HTMLElement>("[data-md-block-id]")?.[savedScroll.anchorBlockIndex] : undefined)
       || null;
     if (!block) return false;
+    const markRestoredBlock = () => {
+      block.setAttribute("data-md-anchor-restored", "true");
+      try {
+        block.animate([
+          { backgroundColor: "rgba(124,92,255,0.16)", outlineColor: "rgba(124,92,255,0.28)" },
+          { backgroundColor: "rgba(124,92,255,0.06)", outlineColor: "rgba(124,92,255,0.12)" },
+          { backgroundColor: "transparent", outlineColor: "transparent" },
+        ], { duration: 1800, easing: "ease-out" });
+      } catch {}
+      window.setTimeout(() => {
+        if (block.isConnected) block.removeAttribute("data-md-anchor-restored");
+      }, 2200);
+    };
     const scrollerTop = el.getBoundingClientRect().top;
     const nextOffset = block.getBoundingClientRect().top - scrollerTop;
     const targetDelta = nextOffset - (savedScroll.anchorOffset || 0);
-    if (Math.abs(targetDelta) <= 1) return true;
+    if (Math.abs(targetDelta) <= 1) {
+      markRestoredBlock();
+      return true;
+    }
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
     el.scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop + targetDelta));
     lastScrollTopRef.current = el.scrollTop;
     updateScrollProgressFromElement(el);
+    markRestoredBlock();
     return true;
   }, [updateScrollProgressFromElement]);
 

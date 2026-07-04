@@ -12,6 +12,7 @@ import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRunt
 import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
 import { AssistantAnswerRenderer } from "./AssistantAnswerRenderer";
 import { normalizeSearchSources } from "@/lib/searchSources";
+import AssistantPendingShell from "./AssistantPendingShell";
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
@@ -165,6 +166,10 @@ export function AssistantMessageContent({
         <FailureActivityEntry sourceCount={sourceCount} onOpenActivity={onOpenActivity} inlineActivity={inlineActivity} />
       </>
     );
+  }
+
+  if (generating && !realtimeHasVisiblePayload && !runtimeState.content) {
+    return <AssistantPendingShell label="正在生成回答" detail={message.isComplexTask ? "复杂任务会在后台保持进度，切回会话后继续恢复" : "已固定首帧高度，避免回答出现前跳动"} />;
   }
 
   if (!shouldRenderStreamingText && !runtimeState.content) {

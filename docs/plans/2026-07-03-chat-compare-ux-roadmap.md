@@ -611,52 +611,58 @@ conversationId -> activeStreams
 
 ## 建议下一轮执行顺序
 
-### 第一轮：Compare 模型可控感闭环
+### 第一轮：P1 发送 / 停止 / 恢复的视觉一致性
 
-**状态:** ⬜ 未开始
+**状态:** 🟡 当前优先执行
 
 任务：
 
-1. Compare 顶部模型栏标注 `下一轮`。
-2. 历史 group 标注 `本轮`。
-3. Compare 模型选择 PATCH 当前 conversation 的 `compare_models`。
-4. 加 live 回归：切模型 → 刷新 → 新发一轮 → payload 使用新模型。
+1. 普通 Chat 与 Compare 共用更稳定的 pending / generating 状态外壳。
+2. 固定 assistant pending 首帧高度，避免 reasoning 首 token 前后跳动。
+3. Stop / resume / route switch 后，避免重复 pending 和状态文案混乱。
+4. Compare 一列完成、一列生成中时，按钮 / 状态文案更明确。
+5. 补充或扩展 live probe，采样 pending height、old row signature、duplicate ids、DOM remount。
 
-**原因:** 这是最近模型选择问题的直接延伸，收益高且范围相对可控。
+**原因:** 用户最直接感知的是“发出去之后稳不稳”，优先做视觉一致性，而不是继续堆架构。
 
 ---
 
-### 第二轮：视觉稳定 live probe
+### 第二轮：P3 Activity / 来源入口继续减噪
 
-**状态:** ⬜ 未开始
+**状态:** 🟡 当前优先执行
 
 任务：
 
-1. 新增 `chat-old-row-stability-live.cjs` 或扩展 `chat-placeholder-jitter-live.cjs`。
-2. 连续发送多轮。
-3. 采样：
-   - pending height
-   - latest assistant id
-   - old row signature
-   - duplicate ids
-   - DOM remount
-4. 根据 probe 结果修 row height / remount。
+1. 聚合卡展开状态在当前面板生命周期内记忆。
+2. 来源域名过多时，默认只展示前 N 个域名，支持“显示全部 / 收起”。
+3. 工具调用、文件检索、网页来源统一入口文案和视觉层级。
+4. 保持普通 Chat 一个入口、Compare 每列一个入口，不新增冗余箭头。
 
-**原因:** 最影响高级感，且可以把“稳定”变成硬指标。
+**原因:** 来源是高频阅读入口，优化应以“少打扰、可展开、可回到原状态”为主。
 
 ---
 
-### 第三轮：Sidebar hook 化
+### 第三轮：P3 长消息性能和阅读定位
 
-**状态:** ⬜ 未开始
+**状态:** 🟡 当前优先执行
 
 任务：
 
-1. 抽 `useChatSidebarHistory()`。
-2. 桌面 / 移动共用。
-3. 回归覆盖 bootstrap merge、cursor、conversation-updated。
+1. 继续强化 block anchor：prepend / restore / hydrate 后不二次跳。
+2. 长 Markdown 的代码块 / 表格做块级增强，不替换整条消息。
+3. 回到某条消息时提供轻量稳定高亮，帮助用户确认定位。
+4. 长回答底部操作不要被列内滚动遮住。
 
-**原因:** 长期架构收益大，但改动范围也大，适合在前两轮之后做。
+**原因:** 目标是“像读文档一样稳”，优先做用户可感知的阅读定位和长内容操作体验。
+
+---
+
+### 已完成 / 不再作为下一轮主任务
+
+- ✅ Compare 模型持久化：已静默 PATCH 当前会话，并有 live 回归覆盖刷新与新一轮 payload。
+- ✅ 视觉稳定 live probe：已新增 5 轮 mixed rich old-row stability stress，覆盖旧消息 DOM/height/text/remount。
+- ✅ Sidebar hook 化：`useChatSidebarHistory()` 已抽出，桌面 / 移动已共用；剩余是 fixture 测试与 optimistic pipeline。
+- ✅ block anchor 第一版：已支持 `anchorMessageId + anchorBlockId + anchorOffset` 恢复阅读位置。
 
 ---
 

@@ -560,7 +560,7 @@ function CompareColumnTurn({
                 </div>
               </div>
               {!isStreaming && (
-                <div className="flex items-center gap-2 px-2 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="sticky bottom-1 z-[2] mt-1 flex items-center gap-2 rounded-xl bg-surface/80 px-2 py-1 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                   <MessageActions
                     onCopy={() => onCopy(msg.content)}
                     onDelete={() => onDelete(msg.id)}
