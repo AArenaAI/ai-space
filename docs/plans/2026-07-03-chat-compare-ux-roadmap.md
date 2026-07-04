@@ -632,7 +632,7 @@ conversationId -> activeStreams
 
 任务：
 
-1. 继续强化 block anchor：prepend / restore / hydrate 后不二次跳。
+1. 继续强化 block anchor：overview 点击后写入 block anchor；prepend / restore / hydrate 后不二次跳。
 2. 长 Markdown 的代码块 / 表格做块级增强，不替换整条消息。
 3. 回到某条消息时提供轻量稳定高亮，帮助用户确认定位。
 4. 长回答底部操作不要被列内滚动遮住。
@@ -666,20 +666,15 @@ conversationId -> activeStreams
 
 **状态:** 🟡 可选优化
 
-当前已有：
-
-```bash
-npm run test:chat-activity-sources
-```
-
-建议后续将它加入发布前手工 checklist，或拆成：
+当前已拆分：
 
 ```bash
 npm run test:chat-activity-sources:fixture
 npm run test:chat-activity-sources:live
+npm run test:chat-activity-sources
 ```
 
-避免每次普通本地开发都跑真实模型。
+普通本地开发跑 fixture；发布前再跑 live 聚合，避免每次开发都打真实模型。
 
 ### C. WebUI / testnet 部署前检查固定化
 

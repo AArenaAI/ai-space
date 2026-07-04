@@ -177,6 +177,13 @@ async function getActiveOverviewId(page) {
     assert.ok(jumped.top >= jumped.scrollerTop && jumped.bottom <= jumped.scrollerBottom, `clicked target should be in viewport: ${JSON.stringify(jumped)}`);
     assert.ok(jumped.centerDelta <= Math.max(48, jumped.scrollerHeight * 0.08), `clicked target should be centered in the chat scroller: ${JSON.stringify(jumped)}`);
     assert.ok(jumped.highlighted, "clicked target should be highlighted");
+    await page.waitForTimeout(120);
+    const savedOverviewAnchor = await page.evaluate(() => {
+      const raw = sessionStorage.getItem('ai-space-chat-scroll:2000');
+      return raw ? JSON.parse(raw) : null;
+    });
+    assert.equal(savedOverviewAnchor?.anchorMessageId, targetId, `overview click should persist the target message as scroll anchor: ${JSON.stringify(savedOverviewAnchor)}`);
+    assert.equal(typeof savedOverviewAnchor?.anchorOffset, 'number', `overview click should persist anchor offset: ${JSON.stringify(savedOverviewAnchor)}`);
 
     // Let the click-jump active lock expire before testing passive scroll active-marker timing.
     await page.waitForTimeout(950);

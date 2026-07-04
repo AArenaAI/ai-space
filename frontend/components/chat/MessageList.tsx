@@ -501,52 +501,79 @@ function MessageList({
     return {};
   }, []);
 
+  const captureMessageBlockAnchor = useCallback((el: HTMLElement, messageId: string) => {
+    const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(messageId)}"]`);
+    if (!row) return {};
+    const blocks = Array.from(row.querySelectorAll<HTMLElement>("[data-md-block-id]"));
+    const block = blocks[0];
+    const scrollerTop = el.getBoundingClientRect().top;
+    if (!block) {
+      return {
+        anchorMessageId: messageId,
+        anchorServerMessageId: row.getAttribute("data-server-message-id") || "",
+        anchorOffset: Math.round(row.getBoundingClientRect().top - scrollerTop),
+      };
+    }
+    return {
+      anchorMessageId: messageId,
+      anchorServerMessageId: row.getAttribute("data-server-message-id") || "",
+      anchorBlockId: block.getAttribute("data-md-block-id") || "",
+      anchorBlockIndex: 0,
+      anchorOffset: Math.round(block.getBoundingClientRect().top - scrollerTop),
+    };
+  }, []);
+
   const restoreVisibleBlockAnchor = useCallback((el: HTMLElement, savedScroll: ReturnType<typeof getConversationScrollState>) => {
-    if (!savedScroll?.anchorMessageId || !savedScroll.anchorBlockId) return false;
+    if (!savedScroll?.anchorMessageId) return false;
     const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(savedScroll.anchorMessageId)}"]`)
       || (savedScroll.anchorServerMessageId ? el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-server-message-id="${CSS.escape(savedScroll.anchorServerMessageId)}"]`) : null)
       || (() => {
         const candidates = Array.from(el.querySelectorAll<HTMLElement>('[data-chat-message-row="true"][data-message-role="assistant"]')).filter((candidate) => candidate.querySelector("[data-md-block-id]"));
         return candidates[candidates.length - 1] || null;
       })();
-    const block = row?.querySelector<HTMLElement>(`[data-md-block-id="${CSS.escape(savedScroll.anchorBlockId)}"]`)
-      || (typeof savedScroll.anchorBlockIndex === "number" ? row?.querySelectorAll<HTMLElement>("[data-md-block-id]")?.[savedScroll.anchorBlockIndex] : undefined)
-      || null;
-    if (!block) return false;
-    const markRestoredBlock = () => {
-      block.setAttribute("data-md-anchor-restored", "true");
+    const block = savedScroll.anchorBlockId
+      ? row?.querySelector<HTMLElement>(`[data-md-block-id="${CSS.escape(savedScroll.anchorBlockId)}"]`)
+        || (typeof savedScroll.anchorBlockIndex === "number" ? row?.querySelectorAll<HTMLElement>("[data-md-block-id]")?.[savedScroll.anchorBlockIndex] : undefined)
+        || null
+      : null;
+    const target = block || row;
+    if (!target) return false;
+    const markRestoredTarget = () => {
+      target.setAttribute(block ? "data-md-anchor-restored" : "data-message-anchor-restored", "true");
       try {
-        block.animate([
+        target.animate([
           { backgroundColor: "rgba(124,92,255,0.16)", outlineColor: "rgba(124,92,255,0.28)" },
           { backgroundColor: "rgba(124,92,255,0.06)", outlineColor: "rgba(124,92,255,0.12)" },
           { backgroundColor: "transparent", outlineColor: "transparent" },
         ], { duration: 1800, easing: "ease-out" });
       } catch {}
       window.setTimeout(() => {
-        if (block.isConnected) block.removeAttribute("data-md-anchor-restored");
+        if (!target.isConnected) return;
+        if (block) target.removeAttribute("data-md-anchor-restored");
+        else target.removeAttribute("data-message-anchor-restored");
       }, 2200);
     };
     const scrollerTop = el.getBoundingClientRect().top;
-    const nextOffset = block.getBoundingClientRect().top - scrollerTop;
+    const nextOffset = target.getBoundingClientRect().top - scrollerTop;
     const targetDelta = nextOffset - (savedScroll.anchorOffset || 0);
     if (Math.abs(targetDelta) <= 1) {
-      markRestoredBlock();
+      markRestoredTarget();
       return true;
     }
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
     el.scrollTop = Math.min(maxScrollTop, Math.max(0, el.scrollTop + targetDelta));
     lastScrollTopRef.current = el.scrollTop;
     updateScrollProgressFromElement(el);
-    markRestoredBlock();
+    markRestoredTarget();
     return true;
   }, [updateScrollProgressFromElement]);
 
-  const saveCurrentConversationScrollState = useCallback((conversationIdOverride?: number) => {
+  const saveCurrentConversationScrollState = useCallback((conversationIdOverride?: number, anchorMessageId?: string) => {
     const el = scrollRef.current;
     const targetConversationId = conversationIdOverride || conversationId;
     if (!el || !targetConversationId) return;
     const distanceToBottom = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
-    const blockAnchor = captureVisibleBlockAnchor(el);
+    const blockAnchor = anchorMessageId ? captureMessageBlockAnchor(el, anchorMessageId) : captureVisibleBlockAnchor(el);
     saveConversationScrollState({
       conversationId: targetConversationId,
       scrollTop: el.scrollTop,
@@ -557,7 +584,7 @@ function MessageList({
       ...blockAnchor,
       updatedAt: Date.now(),
     });
-  }, [captureVisibleBlockAnchor, conversationId]);
+  }, [captureMessageBlockAnchor, captureVisibleBlockAnchor, conversationId]);
 
   const shouldPreserveRestoredBrowsePosition = useCallback(() => {
     const restored = restoredConversationBrowseRef.current;
@@ -1324,7 +1351,8 @@ function MessageList({
     window.requestAnimationFrame(() => window.requestAnimationFrame(scrollToTarget));
     window.setTimeout(scrollToTarget, 120);
     window.setTimeout(centerTarget, 260);
-  }, [allVisibleMessages, centerMessageRowInScroller, highlightMessage, stopBottomLockForUserBrowse, visibleMessages]);
+    window.setTimeout(() => saveCurrentConversationScrollState(undefined, messageId), 340);
+  }, [allVisibleMessages, centerMessageRowInScroller, highlightMessage, saveCurrentConversationScrollState, stopBottomLockForUserBrowse, visibleMessages]);
 
   const didSwitchConversation = lastConversationIdRef.current !== conversationId;
 
