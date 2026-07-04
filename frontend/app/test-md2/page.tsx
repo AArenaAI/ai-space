@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api/client";
 
 function parseThinkContent(content: string) {
   const startIdx = content.indexOf("<think>");
@@ -98,10 +99,7 @@ export default function TestPage2() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    fetch("/api/conversations/212", {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    apiFetch("/conversations/212")
       .then(r => r.json())
       .then(data => {
         const msg = data.messages?.find((m: any) => m.id === 866);

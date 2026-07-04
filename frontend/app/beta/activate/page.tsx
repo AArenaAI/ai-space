@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, CheckCircle, Clock3, Gift, KeyRound, Loader2, Send, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api/client";
 
 interface ActivationResult {
   phase?: string;
@@ -44,13 +45,8 @@ export default function BetaActivatePage() {
     }
     setSubmitting(true);
     try {
-      const token = localStorage.getItem("token");
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers.Authorization = `Bearer ${token}`;
-
-      const res = await fetch("/api/beta/use-invite", {
+      const res = await apiFetch("/beta/use-invite", {
         method: "POST",
-        headers,
         body: JSON.stringify({ code: normalizedCode }),
       });
       const data = await res.json().catch(() => ({}));

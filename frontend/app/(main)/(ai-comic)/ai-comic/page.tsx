@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { consumeChatStream } from "@/lib/chatStream";
 import { getErrorMessage, readApiError } from "@/lib/errors";
+import { apiFetch } from "@/lib/api/client";
 
 import {
   ASSET_ROLE_OPTIONS,
@@ -91,15 +92,6 @@ import {
   buildEpisodeScriptSystemPrompt,
 } from "./seedreamPrompts";
 
-function getAuthHeaders() {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-}
-
-function getAuthOnlyHeaders(): Record<string, string> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 function extractTextFromChatResponse(data: any): string {
   const choice = data?.choices?.[0];
@@ -107,9 +99,8 @@ function extractTextFromChatResponse(data: any): string {
 }
 
 async function fetchWorkflowChat(payload: Record<string, any>): Promise<Response> {
-  const initResponse = await fetch("/api/chat/init", {
+  const initResponse = await apiFetch("/chat/init", {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify({ ...payload, stream: true, init_only: true }),
   });
   if (!initResponse.ok) return initResponse;
@@ -121,9 +112,7 @@ async function fetchWorkflowChat(payload: Record<string, any>): Promise<Response
       headers: { "Content-Type": "application/json" },
     });
   }
-  return fetch(`/api/tasks/${taskId}/stream?after=0`, {
-    headers: getAuthOnlyHeaders(),
-  });
+  return apiFetch(`/tasks/${taskId}/stream?after=0`);
 }
 
 async function fetchWorkflowChatRequest(init: RequestInit): Promise<Response> {
@@ -1559,9 +1548,8 @@ export default function SeedreamBetaPage() {
 
   const ensureWorkflowConversationId = async () => {
     if (activeProject?.conversationId) return activeProject.conversationId;
-    const response = await fetch("/api/conversations", {
+    const response = await apiFetch("/conversations", {
       method: "POST",
-      headers: getAuthHeaders(),
       body: JSON.stringify({
         title: workspaceProjectName || "漫剧项目",
         model: getWorkflowModel("ideaChat"),
@@ -2023,7 +2011,6 @@ export default function SeedreamBetaPage() {
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModeModel(mode),
           conversation_id: conversationId,
@@ -2123,7 +2110,6 @@ export default function SeedreamBetaPage() {
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("ideaChat"),
           conversation_id: conversationId,
@@ -2162,7 +2148,6 @@ export default function SeedreamBetaPage() {
     const conversationId = await ensureWorkflowConversationId();
     const response = await fetchWorkflowChatRequest({
       method: "POST",
-      headers: getAuthHeaders(),
       body: JSON.stringify({
         model: getWorkflowModel("ideaExtract"),
         conversation_id: conversationId,
@@ -2230,7 +2215,6 @@ export default function SeedreamBetaPage() {
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("outline"),
           conversation_id: conversationId,
@@ -2270,7 +2254,6 @@ export default function SeedreamBetaPage() {
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("episodeScript"),
           conversation_id: conversationId,
@@ -2351,7 +2334,6 @@ export default function SeedreamBetaPage() {
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("scriptRewrite"),
           conversation_id: conversationId,
@@ -2395,7 +2377,6 @@ ${question}` },
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("scriptRewrite"),
           conversation_id: conversationId,
@@ -2445,7 +2426,6 @@ ${instruction}` },
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("assetExtract"),
           conversation_id: conversationId,
@@ -2490,7 +2470,6 @@ ${question}` },
       const conversationId = await ensureWorkflowConversationId();
       const response = await fetchWorkflowChatRequest({
         method: "POST",
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           model: getWorkflowModel("assetExtract"),
           conversation_id: conversationId,
@@ -2584,10 +2563,8 @@ ${instruction || "在保持角色/场景/道具/风格定位不变的前提下�
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const token = localStorage.getItem("token");
-      const response = await fetch("/api/files/upload", {
+      const response = await apiFetch("/files/upload", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       if (!response.ok) throw await readApiError(response);
