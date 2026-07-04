@@ -1,12 +1,18 @@
 "use client";
 
-import { FileText, Languages, Mic, PenLine, Sparkles } from "lucide-react";
+import { FileText, GraduationCap, Languages, Mic, PenLine, Sparkles } from "lucide-react";
 import ModuleSidebar, { type ModuleSidebarGroup } from "./ModuleSidebar";
 
 export const WORK_NAV_GROUPS: ModuleSidebarGroup[] = [
   {
     titleKey: "sidebar.panel.agents",
     items: [
+      {
+        icon: GraduationCap,
+        labelKey: "gaokao.navLabel",
+        href: "/gaokao-volunteer",
+        matchPath: "/gaokao-volunteer",
+      },
       {
         icon: Sparkles,
         labelKey: "seedreamBeta.navLabel",

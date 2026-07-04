@@ -73,6 +73,13 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	// 用量记录服务
 	usageService := services.NewUsageService(cfg)
 
+	// 高考志愿服务（数据检索 + 冲稳保推荐）
+	gaokaoService := services.NewGaokaoService(db)
+	if err := gaokaoService.EnsureSeedData(); err != nil {
+		fmt.Printf("[WARN] 高考志愿种子数据初始化失败: %v\n", err)
+	}
+	gaokaoHandler := NewGaokaoHandler(db, gaokaoService)
+
 	// 专用翻译服务（Google Cloud Translation）
 	translateService := services.NewTranslateService(cfg)
 	liveTranslateHandler := NewLiveTranslateHandler(db, cfg)
@@ -140,6 +147,16 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		publicWithAuth.POST("/chat/init", chatHandler.InitChat)
 		publicWithAuth.POST("/chat/compare/init", chatHandler.InitCompareChat)
 		publicWithAuth.GET("/chat/bootstrap", chatBootstrapHandler.Get)
+
+		// 高考志愿推荐路由
+		publicWithAuth.POST("/gaokao/recommend", gaokaoHandler.Recommend)
+		publicWithAuth.POST("/gaokao/advisor", gaokaoHandler.Advisor)
+		publicWithAuth.POST("/gaokao/advisor/stream", gaokaoHandler.AdvisorStream)
+		publicWithAuth.POST("/gaokao/volunteer-table", gaokaoHandler.VolunteerTable)
+		publicWithAuth.POST("/gaokao/agent-adjust", gaokaoHandler.AgentAdjust)
+		publicWithAuth.POST("/gaokao/risk-check", gaokaoHandler.RiskCheck)
+		publicWithAuth.GET("/gaokao/coverage", gaokaoHandler.Coverage)
+		publicWithAuth.GET("/gaokao/import-template", gaokaoHandler.ImportTemplate)
 
 		// 专用翻译路由
 		translateHandler := NewTranslateHandler(db, translateService, usageService)
@@ -291,6 +308,10 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			// 汇率接口
 			exchangeRateHandler := NewExchangeRateHandler()
 			admin.GET("/exchange-rate", exchangeRateHandler.GetExchangeRate)
+
+			// 高考志愿数据导入
+			admin.GET("/gaokao/import-template", gaokaoHandler.ImportTemplate)
+			admin.POST("/gaokao/import-csv", gaokaoHandler.ImportCSV)
 		}
 	}
 
@@ -300,6 +321,11 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.POST("/translate/live/ticket", liveTranslateHandler.CreateTicket)
 
 	authorized.POST("/beta/feedback", betaFeedbackHandler.Submit)
+
+	// 高考志愿方案保存 / 历史版本
+	authorized.GET("/gaokao/plans", gaokaoHandler.ListPlans)
+	authorized.POST("/gaokao/plans", gaokaoHandler.SavePlan)
+	authorized.GET("/gaokao/plans/:id", gaokaoHandler.GetPlan)
 
 	authorized.GET("/conversations", convHandler.List)
 	authorized.GET("/conversations/search", convHandler.Search)
