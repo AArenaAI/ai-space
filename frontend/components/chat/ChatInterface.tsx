@@ -785,14 +785,11 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
         />
       )}
 
-      {/* 底部输入框 - 始终渲染，空状态时隐藏在下方 */}
-      {!messageSelectMode && (
+      {/* 底部输入框 - 新空对话只渲染欢迎区 composer，避免首屏出现第二个可聚焦输入框 */}
+      {!messageSelectMode && !isNewEmptyChat && (
         <div className={cn(
-          "z-[70] absolute inset-x-0 bottom-0 transition-[right,opacity,transform] duration-200 ease-out",
+          "z-[70] absolute inset-x-0 bottom-0 transition-[right,opacity,transform] duration-200 ease-out opacity-100 translate-y-0 scale-100 pointer-events-auto",
           activityPanelOpen && !activeCompareMode && CHAT_ACTIVITY_PANEL_WIDTH_CLASS,
-          isNewEmptyChat
-            ? "opacity-0 translate-y-20 scale-95 pointer-events-none"
-            : "opacity-100 translate-y-0 scale-100 pointer-events-auto"
         )}>
           <div className="pointer-events-none bg-gradient-to-t from-surface-elevated via-surface-elevated via-60% to-transparent pt-10">
             <div className="pointer-events-auto relative z-[70]">
