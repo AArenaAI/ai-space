@@ -89,6 +89,7 @@
     "test:chat-active-task-resume-live": "node scripts/regression/chat-active-task-resume-live.cjs",
     "test:chat-active-task-interrupt-resume-live": "node scripts/regression/chat-active-task-interrupt-resume-live.cjs",
     "test:chat-stop-button-multi-switch-live": "node scripts/regression/chat-stop-button-multi-switch-live.cjs",
+    "test:chat-p1-state-consistency-live": "node scripts/regression/chat-p1-state-consistency-live.cjs",
     "test:chat-bootstrap-429-pressure-live": "node scripts/regression/chat-bootstrap-429-pressure-live.cjs",
     "test:chat-dynamic-shell-live": "node scripts/regression/chat-dynamic-shell-live.cjs",
     "test:chat-live-regression": "npm run test:chat-bootstrap-304-live && npm run test:chat-page-state-live && npm run test:chat-quick-switch-live && npm run test:chat-active-task-resume-live && npm run test:chat-dynamic-shell-live",

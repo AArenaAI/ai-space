@@ -19,6 +19,7 @@ source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "co
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
 source = source.replace(/import \{ emitTaskFinished as defaultEmitTaskFinished \} from "@\/lib\/taskNotifications";\n/g, "const defaultEmitTaskFinished = () => {};\n");
 source = source.replace(/import \{ realtimeGet as defaultRealtimeGet \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeGet = () => undefined;\n");
+source = source.replace(/import \{ readAuthState \} from "@\/lib\/auth\/state";\n/g, "const readAuthState = () => ({ token: null });\n");
 source = source.replace(
   /import \{ getNotificationConversationTitle \} from "@\/lib\/chatBackgroundTaskRegistration";\n/g,
   fs.readFileSync(registrationFile, "utf8").replace(/export /g, "") + "\n"
