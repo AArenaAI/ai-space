@@ -169,7 +169,7 @@ export function AssistantMessageContent({
   }
 
   if (generating && !realtimeHasVisiblePayload && !runtimeState.content) {
-    return <AssistantPendingShell label="正在生成回答" detail={message.isComplexTask ? "复杂任务会在后台保持进度，切回会话后继续恢复" : "已固定首帧高度，避免回答出现前跳动"} />;
+    return <AssistantPendingShell label="正在生成回答" detail={message.isComplexTask ? "后台保持进度" : undefined} />;
   }
 
   if (!shouldRenderStreamingText && !runtimeState.content) {
