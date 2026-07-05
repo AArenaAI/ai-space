@@ -144,7 +144,7 @@ async function sendPromptFromUi(page, prompt) {
   const auth = await login({ baseUrl });
   const convA = await createConversation(baseUrl, auth.token, `P1 state A ${stamp}`, model);
   const convB = await createConversation(baseUrl, auth.token, `P1 state B ${stamp}`, model);
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, viewport: { width: 1440, height: 980 } });
+  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
   const events = { requests: [], responses: [], console: [], errors: [], requestfailed: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.responses.push({ status: res.status(), url: u }); });

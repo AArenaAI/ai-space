@@ -42,7 +42,7 @@ async function clickConversation(page, id, delayMs = 0) {
     conversations.push(await createConversation(baseUrl, auth.token, `Bootstrap 429 Probe ${stamp}-${i}`, model));
   }
 
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user });
+  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const responses = [];
   const failed = [];
   const consoleMessages = [];

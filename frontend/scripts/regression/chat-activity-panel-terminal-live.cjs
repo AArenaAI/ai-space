@@ -28,7 +28,7 @@ async function panelText(page) {
   const conversationId = Number(env('TESTNET_CONVERSATION_ID') || env('CHAT_ACTIVITY_CONVERSATION_ID') || 1168);
   const rounds = Number(env('CHAT_ACTIVITY_PANEL_ROUNDS') || 3);
   const auth = await login({ baseUrl });
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user });
+  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { console: [], errors: [], responses: [] };
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 500) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 500)));

@@ -23,8 +23,9 @@ async function login({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), email = 
   if (!res.ok) throw new Error(`login ${res.status}: ${text}`);
   const data = text ? JSON.parse(text) : {};
   const setCookie = res.headers.get('set-cookie') || '';
+  const sessionMatch = setCookie.match(/ai_space_session=([^;,]+)/);
   const refreshMatch = setCookie.match(/ai_space_refresh_token=([^;,]+)/);
-  return { ...data, refreshToken: refreshMatch?.[1] || '' };
+  return { ...data, sessionToken: sessionMatch?.[1] || '', refreshToken: refreshMatch?.[1] || '' };
 }
 
 async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE) } = {}) {
@@ -36,11 +37,18 @@ async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_B
   return data;
 }
 
-async function openAuthedPage({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, user, refreshToken = '', viewport = { width: 1440, height: 1000 } }) {
+async function openAuthedPage({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, user, sessionToken = '', refreshToken = '', viewport = { width: 1440, height: 1000 } }) {
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
   const context = await browser.newContext({ viewport });
+  const cookies = [];
+  if (sessionToken) {
+    cookies.push({ name: 'ai_space_session', value: sessionToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' });
+  }
   if (refreshToken) {
-    await context.addCookies([{ name: 'ai_space_refresh_token', value: refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
+    cookies.push({ name: 'ai_space_refresh_token', value: refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' });
+  }
+  if (cookies.length) {
+    await context.addCookies(cookies);
   }
   const page = await context.newPage();
   await page.addInitScript(({ token, user }) => {

@@ -22,7 +22,7 @@ const { env, login, openAuthedPage, summarizeConsole, printResult } = require('.
     return;
   }
   const conversationId = targetTask.conversation_id;
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user });
+  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });

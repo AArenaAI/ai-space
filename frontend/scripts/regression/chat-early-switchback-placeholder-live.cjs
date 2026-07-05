@@ -54,7 +54,7 @@ async function sample(page, label) {
   const stamp = Date.now();
   const convA = await createConversation(baseUrl, auth.token, `Early switch A ${stamp}`, model);
   const convB = await createConversation(baseUrl, auth.token, `Early switch B ${stamp}`, model);
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user });
+  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/')) events.responses.push({ status: res.status(), url: u }); });
