@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api/client";
 import { buildChatRequestHeaders } from "./chatRequestBuilder";
 
 export type CompareInitGroup = {
@@ -50,7 +51,7 @@ export async function initCompareRun({
 }: InitCompareRunOptions): Promise<CompareInitResponse> {
   const headers = buildChatRequestHeaders({ token, guestId: guestId || "" });
   const numericWorkspaceId = typeof workspaceId === "string" ? Number(workspaceId) : workspaceId;
-  const response = await fetchImpl(`${apiBaseUrl}/api/chat/compare/init`, {
+  const requestInit: RequestInit = {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -61,7 +62,10 @@ export async function initCompareRun({
       compare_models: compareModelIds,
       skill_key: skillKey,
     }),
-  });
+  };
+  const response = fetchImpl === fetch && !apiBaseUrl
+    ? await apiFetch("/chat/compare/init", requestInit)
+    : await fetchImpl(`${apiBaseUrl}/api/chat/compare/init`, requestInit);
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
     const errorCode = errorBody.error || errorBody.code || "compare_init_failed";
