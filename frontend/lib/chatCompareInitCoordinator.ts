@@ -63,7 +63,9 @@ export async function initCompareRun({
       skill_key: skillKey,
     }),
   };
-  const response = fetchImpl === fetch && !apiBaseUrl
+  const isBrowserSameOriginApi = typeof window !== "undefined"
+    && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+  const response = fetchImpl === fetch && isBrowserSameOriginApi
     ? await apiFetch("/chat/compare/init", requestInit)
     : await fetchImpl(`${apiBaseUrl}/api/chat/compare/init`, requestInit);
   if (!response.ok) {
