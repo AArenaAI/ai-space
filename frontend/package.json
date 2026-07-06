@@ -101,6 +101,8 @@
     "test:chat-activity-entry-states-fixture": "node scripts/regression/chat-activity-entry-states-fixture.cjs",
     "test:chat-final-render-live": "node scripts/regression/chat-final-render-live.cjs",
     "test:chat-compare-activity-dual-live": "node scripts/regression/chat-compare-activity-dual-live.cjs",
+    "test:chat-live-smoke": "npm run test:chat-dynamic-shell-live && npm run test:chat-real-live-send-e2e && npm run test:chat-compare-activity-dual-live",
+    "test:chat-live-full": "npm run test:chat-live-smoke && npm run test:chat-p1-state-consistency-live",
     "test:chat-search-sources-family-live": "node scripts/regression/chat-search-sources-family-live.cjs",
     "test:chat-activity-sources:fixture": "npm run test:chat-activity-entry-states-fixture",
     "test:chat-activity-sources:live": "SEARCH_SOURCE_MODELS=gemini-3.5-flash,kimi-k2.5 npm run test:chat-search-sources-family-live && COMPARE_ACTIVITY_SEARCH=1 COMPARE_ACTIVITY_MODELS=deepseek-v4-pro,deepseek-v4-flash npm run test:chat-compare-activity-dual-live",

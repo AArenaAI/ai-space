@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 async function apiJson(baseUrl, path, token, init = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
@@ -143,6 +143,7 @@ async function sendPromptFromUi(page, prompt) {
   const auth = await login({ baseUrl });
   const convA = await createConversation(baseUrl, auth.token, `P1 state A ${stamp}`, model);
   const convB = await createConversation(baseUrl, auth.token, `P1 state B ${stamp}`, model);
+  let cleanup;
   const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
   const events = { requests: [], responses: [], console: [], errors: [], requestfailed: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.requests.push({ method: req.method(), url: u }); });
@@ -219,10 +220,15 @@ async function sendPromptFromUi(page, prompt) {
       consoleErrors: summarizeConsole(events.console),
       pageErrors: events.errors,
     };
+    cleanup = await cleanupConversations({ baseUrl, token: auth.token, conversationIds: [convA.id, convB.id] });
+    result.cleanup = cleanup;
     printResult(result);
     if (!result.ok) process.exit(2);
   } finally {
     await browser.close().catch(() => {});
+    if (!cleanup) {
+      await cleanupConversations({ baseUrl, token: auth.token, conversationIds: [convA.id, convB.id] }).catch(() => {});
+    }
   }
 })().catch((error) => {
   console.error(error.stack || error);

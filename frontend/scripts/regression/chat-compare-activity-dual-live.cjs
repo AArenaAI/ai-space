@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 function passwordFromCodes() {
   const codes = env('TESTNET_PASSWORD_CODES');
@@ -18,16 +18,6 @@ async function jsonFetch(url, options = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
   if (!res.ok) throw new Error(`${options.method || 'GET'} ${url} ${res.status}: ${text.slice(0, 500)}`);
   return data;
-}
-
-async function deleteConversation({ baseUrl, token, conversationId }) {
-  if (!conversationId || env('KEEP_LIVE_CONVERSATIONS') === '1') return { skipped: true };
-  const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const text = await res.text().catch(() => '');
-  return { status: res.status, ok: res.ok, body: text.slice(0, 200) };
 }
 
 async function streamTaskToDone({ baseUrl, token, taskId }) {
@@ -219,7 +209,7 @@ async function inspectActivity(page) {
     split = await inspectActivity(page);
   } finally {
     await browser.close().catch(() => {});
-    cleanup = await deleteConversation({ baseUrl, token: auth.token, conversationId: created.conversation.id }).catch((error) => ({ ok: false, error: error.message }));
+    cleanup = await cleanupConversations({ baseUrl, token: auth.token, conversationIds: [created.conversation.id] });
   }
 
   const result = {

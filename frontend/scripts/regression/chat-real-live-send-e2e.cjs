@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const baseUrl = trimTrailingSlash(env('REAL_CHAT_BASE_URL', env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz')));
 const apiBaseUrl = trimTrailingSlash(env('REAL_CHAT_API_BASE_URL', baseUrl));
@@ -45,16 +45,6 @@ async function apiJson(path, token, init = {}) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
   if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} ${res.status}: ${redact(text.slice(0, 500))}`);
   return data;
-}
-
-async function deleteConversation(id, token) {
-  if (!id || keepConversation) return { skipped: true };
-  const res = await fetch(`${apiBaseUrl}/api/conversations/${id}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const text = await res.text().catch(() => '');
-  return { status: res.status, ok: res.ok, body: text.slice(0, 200) };
 }
 
 async function waitForHttpOk(url, timeout = 60000) {
@@ -241,7 +231,7 @@ async function main() {
   } finally {
     await browser?.close().catch(() => {});
     if (conversation?.id && auth?.token) {
-      cleanup = await deleteConversation(conversation.id, auth.token).catch((error) => ({ ok: false, error: error.message }));
+      cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] });
       report.cleanup = cleanup;
     }
   }

@@ -58,6 +58,24 @@ async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_B
   return data;
 }
 
+async function deleteConversation({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, conversationId }) {
+  if (!conversationId || env('KEEP_LIVE_CONVERSATIONS') === '1') return { skipped: true, conversationId };
+  const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const text = await res.text().catch(() => '');
+  return { conversationId, status: res.status, ok: res.ok, body: text.slice(0, 200) };
+}
+
+async function cleanupConversations({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, conversationIds = [] }) {
+  const results = [];
+  for (const conversationId of conversationIds.filter(Boolean)) {
+    results.push(await deleteConversation({ baseUrl, token, conversationId }).catch((error) => ({ conversationId, ok: false, error: error.message })));
+  }
+  return results;
+}
+
 async function openAuthedPage({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, user, sessionToken = '', refreshToken = '', viewport = { width: 1440, height: 1000 } }) {
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
   const context = await browser.newContext({ viewport });
@@ -94,6 +112,8 @@ module.exports = {
   requireEnv,
   login,
   apiGet,
+  deleteConversation,
+  cleanupConversations,
   openAuthedPage,
   summarizeConsole,
   printResult,
