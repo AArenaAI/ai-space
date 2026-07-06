@@ -4,6 +4,10 @@ export type ChatStreamOwner = {
   serverMessageId?: number | string;
   streamId: string;
   sequence?: number;
+  groupId?: number | string;
+  groupIndex?: number;
+  groupModels?: string[];
+  column?: "left" | "right" | string;
   [key: string]: unknown;
 };
 
@@ -12,6 +16,9 @@ export type ChatStreamOwnerAbortReason = "replaced" | "navigation" | "stop" | "c
 type AbortOwner = (owner: ChatStreamOwner, reason: ChatStreamOwnerAbortReason) => void;
 
 function ownerKey(owner: ChatStreamOwner) {
+  if (owner.groupId !== undefined && owner.groupIndex !== undefined) {
+    return `compare:${owner.conversationId}:${owner.groupId}:${owner.groupIndex}`;
+  }
   if (owner.taskId !== undefined) return `task:${owner.conversationId}:${owner.taskId}`;
   if (owner.serverMessageId !== undefined) return `message:${owner.conversationId}:${owner.serverMessageId}`;
   return `stream:${owner.conversationId}:${owner.streamId}`;

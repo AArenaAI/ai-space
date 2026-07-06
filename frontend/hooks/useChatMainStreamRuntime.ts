@@ -123,6 +123,10 @@ export function createStreamResponseAction({
       conversationId: convId || getCurrentConversation() || 0,
       serverMessageId: assistantMsg.serverMessageId,
       streamId: assistantMsg.id,
+      groupId: assistantMsg.groupId,
+      groupIndex: assistantMsg.groupIndex,
+      groupModels: assistantMsg.groupModels,
+      column: assistantMsg.groupIndex === 1 ? "right" : assistantMsg.groupIndex === 0 ? "left" : undefined,
     };
     streamOwnerRegistry.register(streamOwner);
 

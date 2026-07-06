@@ -110,6 +110,7 @@ test("coordinator resolves once when group context is ready", async () => {
 
 test("runCompareModels preserves assistant groupIndex for single-column explicit retry", async () => {
   const calls = [];
+  const streamedAssistants = [];
   await runCompareModels({
     headers: { "Content-Type": "application/json" },
     controllers: [new AbortController()],
@@ -126,7 +127,10 @@ test("runCompareModels preserves assistant groupIndex for single-column explicit
         calls.push(init.body ? JSON.parse(init.body) : {});
         return okResponse({ assistant_message_id: 902, task_id: 903, assistant_message: { id: 902, generation_status: "running" } });
       },
-      streamResponse: async () => ({ lastSequence: 1, content: "", useBackground: false, sawDone: true }),
+      streamResponse: async (_response, assistant) => {
+        streamedAssistants.push({ ...assistant });
+        return { lastSequence: 1, content: "", useBackground: false, sawDone: true };
+      },
       onGroupContextResolved: () => {},
       onRecoverableResult: () => {},
       onAbortUser: () => {},
@@ -141,6 +145,10 @@ test("runCompareModels preserves assistant groupIndex for single-column explicit
   assert.equal(initBodies[0].user_message_id, 901);
   assert.equal(initBodies[0].group_index, 1);
   assert.equal(initBodies[0].skip_save_user_msg, true);
+  assert.equal(streamedAssistants.length, 1);
+  assert.equal(streamedAssistants[0].groupIndex, 1);
+  assert.equal(streamedAssistants[0].groupId, 900);
+  assert.deepEqual(streamedAssistants[0].groupModels, ["m1", "m2"]);
 });
 
 test("runCompareModels starts every model immediately when explicit group context is provided", async () => {

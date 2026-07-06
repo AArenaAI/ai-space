@@ -234,6 +234,13 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
       (assistant as any).id = serverBoundId;
       (assistant as any).serverMessageId = serverMessageId;
       (assistant as any).generationTaskId = generationTaskId;
+      (assistant as any).groupId = requestGroupContext?.groupId;
+      (assistant as any).userMessageId = requestGroupContext?.userMessageId;
+      (assistant as any).groupIndex = requestIndex;
+      (assistant as any).groupModels = resolveCompareRequestGroupModels({
+        requestGroupModels: requestGroupContext?.groupModels,
+        fallbackGroupModels: options.compareModelIds,
+      });
       (assistant as any).serverGenerationStatus = init.assistant_message?.server_generation_status || init.assistant_message?.generation_status || "running";
       options.callbacks.onRecoverableResult(assistant, {
         serverMessageId,

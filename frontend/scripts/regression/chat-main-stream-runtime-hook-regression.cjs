@@ -261,7 +261,12 @@ async function testStaleMainStreamOwnerSkipsFinallyReconciliation() {
     convId: 55,
   });
   assert.equal(result, undefined);
-  assert.ok(registryCalls.some((call) => call[0] === "register" && call[1].conversationId === 55 && call[1].streamId === "assistant-1"));
+  const registeredOwner = registryCalls.find((call) => call[0] === "register")?.[1];
+  assert.equal(registeredOwner.conversationId, 55);
+  assert.equal(registeredOwner.streamId, "assistant-1");
+  assert.equal(registeredOwner.groupIndex, 1);
+  assert.equal(registeredOwner.groupId, "g");
+  assert.equal(registeredOwner.column, "right");
   assert.ok(registryCalls.some((call) => call[0] === "canFinalize"));
   assert.ok(!registryCalls.some((call) => call[0] === "finalize"));
   assert.equal(messages[0].content, "");

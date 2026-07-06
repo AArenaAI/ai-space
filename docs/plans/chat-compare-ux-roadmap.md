@@ -564,7 +564,7 @@ ConversationRuntimeStore
 
 ### 13. Stream ownership 正式化
 
-**状态:** 🟡 第四包已完成 Stop / conversation-level owner abort 覆盖，后续继续扩展更细的 Compare column owner key
+**状态:** 🟡 第五包已完成 Compare column owner key 精细化，后续只剩更广 cache 写入路径覆盖
 
 **已完成:**
 
@@ -610,6 +610,14 @@ conversationId -> activeStreams
 - `runStopGeneration` 增加 `abortStreamOwners` callback，Stop 时与 task streams/controller abort 同步清 owner。
 - `createStopGenerationAction` 接入 `chatStreamOwnerRegistry.abortConversation(currentConversation, "stop")`，覆盖普通 Chat 与 Compare 当前会话级 Stop。
 - 回归覆盖：stop coordinator 必须调用 owner abort、generation controls 通过当前 conversation 清理 owner，同时 Compare run/stream/runtime 回归保持通过。
+
+**已完成第五包:**
+
+- `ChatStreamOwner` 增加 `groupId`、`groupIndex`、`groupModels`、`column` metadata。
+- `StreamOwnerRegistry` 对带 `groupId + groupIndex` 的 Compare stream 使用 column-level key：同会话同 group 同列替换旧 owner，另一列不受影响。
+- `runCompareModels` 在 server-bound assistant 上写入 group metadata，单列 retry / explicit group context 会传给 `streamResponse`。
+- `useChatMainStreamRuntime` 注册 owner 时携带 group/column metadata，左列=`groupIndex 0`，右列=`groupIndex 1`。
+- 回归覆盖：Compare 左列重试只 retire 左列 owner、不影响右列；main stream owner metadata 完整；single-column explicit retry 保留 group metadata。
 
 ---
 
