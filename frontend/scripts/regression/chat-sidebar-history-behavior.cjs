@@ -8,6 +8,8 @@ const assert = require('node:assert/strict');
     hasMoreSidebarConversations,
     mergeSidebarConversations,
     parseSidebarCursor,
+    patchSidebarConversation,
+    removeSidebarConversation,
     sortSidebarConversations,
   } = mod;
 
@@ -71,6 +73,42 @@ const assert = require('node:assert/strict');
   assert.equal(optimistic.pinned, false);
   assert.deepEqual(optimisticNew.map((item) => item.id), [2, 9, 3, 1], 'optimistic row should appear in recent activity order under pinned items');
 
+  const tempCreated = applySidebarConversationActivity(base, {
+    id: -1001,
+    client_temp_id: 'temp-a',
+    title: 'Temporary title',
+    model: 'gpt-temp',
+    source: 'local-create',
+    updated_at: '2026-01-01T00:00:09.000Z',
+  });
+  const tempRow = tempCreated.find((item) => item.id === -1001);
+  assert.ok(tempRow, 'local-create should insert a temporary sidebar row before the server id exists');
+  assert.equal(tempRow.title_pending, true, 'temporary created rows should show a weak title-pending state');
+  assert.deepEqual(tempCreated.map((item) => item.id), [2, -1001, 3, 1], 'temporary create should appear in recent activity order under pinned items');
+
+  const canonicalCreated = applySidebarConversationActivity(tempCreated, {
+    id: 77,
+    client_temp_id: 'temp-a',
+    replaceClientTempId: 'temp-a',
+    title: 'Server title',
+    model: 'gpt-temp',
+    source: 'created',
+    updated_at: '2026-01-01T00:00:10.000Z',
+  });
+  assert.equal(canonicalCreated.some((item) => item.id === -1001), false, 'server create should replace the temporary row instead of duplicating it');
+  const canonicalRow = canonicalCreated.find((item) => item.id === 77);
+  assert.ok(canonicalRow, 'server create should keep one canonical sidebar row');
+  assert.equal(canonicalRow.client_temp_id, 'temp-a', 'canonical row should preserve temp id mapping for active highlight continuity');
+  assert.equal(canonicalRow.canonical_id, 77, 'canonical row should expose canonical id for active highlight');
+  assert.equal(canonicalRow.title_pending, false, 'server title should clear the weak pending state');
+
+  const patched = patchSidebarConversation(canonicalCreated, 77, { pinned: true, title: 'Pinned canonical' });
+  assert.equal(patched.find((item) => item.id === 77).pinned, true, 'patchSidebarConversation should update a row through the shared pipeline');
+  assert.deepEqual(patched.map((item) => item.id).slice(0, 2), [77, 2], 'pin patch should reorder through the shared sorter');
+
+  const removed = removeSidebarConversation(patched, 77);
+  assert.equal(removed.some((item) => item.id === 77), false, 'removeSidebarConversation should remove rows through the shared pipeline');
+
   assert.deepEqual(parseSidebarCursor('2026-01-01T00:00:08.000Z:42'), { beforeActivityAt: '2026-01-01T00:00:08.000Z', beforeId: '42' }, 'cursor parser should split from the last colon to preserve ISO timestamps');
   assert.equal(parseSidebarCursor('bad-cursor'), null, 'invalid cursor should return null');
   assert.equal(hasMoreSidebarConversations(10, 20, 100, undefined), true, 'total-based hasMore should work');
@@ -78,7 +116,7 @@ const assert = require('node:assert/strict');
   assert.equal(hasMoreSidebarConversations(3, 500, undefined, false), false, 'server has_more=false should win');
   assert.equal(hasMoreSidebarConversations(3, 500, undefined, true), true, 'server has_more=true should win');
 
-  console.log(JSON.stringify({ ok: true, sorted: sorted.map((item) => item.id), optimisticOrder: optimisticNew.map((item) => item.id) }));
+  console.log(JSON.stringify({ ok: true, sorted: sorted.map((item) => item.id), optimisticOrder: optimisticNew.map((item) => item.id), canonicalOrder: canonicalCreated.map((item) => item.id) }));
 })().catch((error) => {
   console.error(error.stack || error.message);
   process.exit(1);

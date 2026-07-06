@@ -6,6 +6,8 @@ export type ChatConversationMetadataEvent = {
   workspace_id?: number;
   updated_at?: string;
   source?: string;
+  client_temp_id?: string;
+  replaceClientTempId?: string;
 };
 
 function normalizeNumericId(value: unknown): number | undefined {
@@ -28,6 +30,8 @@ export function normalizeConversationMetadataEventDetail(detail: unknown): ChatC
   const workspaceId = normalizeNumericId(record.workspace_id);
   const updatedAt = typeof record.updated_at === "string" ? record.updated_at : undefined;
   const source = typeof record.source === "string" ? record.source : undefined;
+  const clientTempId = typeof record.client_temp_id === "string" ? record.client_temp_id : undefined;
+  const replaceClientTempId = typeof record.replaceClientTempId === "string" ? record.replaceClientTempId : undefined;
   return {
     id,
     ...(title !== undefined ? { title } : {}),
@@ -36,6 +40,8 @@ export function normalizeConversationMetadataEventDetail(detail: unknown): ChatC
     ...(workspaceId !== undefined ? { workspace_id: workspaceId } : {}),
     ...(updatedAt !== undefined ? { updated_at: updatedAt } : {}),
     ...(source !== undefined ? { source } : {}),
+    ...(clientTempId !== undefined ? { client_temp_id: clientTempId } : {}),
+    ...(replaceClientTempId !== undefined ? { replaceClientTempId } : {}),
   };
 }
 

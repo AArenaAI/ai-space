@@ -5,7 +5,10 @@ import {
   hasMoreSidebarConversations,
   mergeSidebarConversations,
   parseSidebarCursor,
+  patchSidebarConversation,
+  removeSidebarConversation,
   sortSidebarConversations,
+  type ChatSidebarActivityUpdate,
   type ChatSidebarConversation,
 } from "@/lib/chatSidebarHistory";
 import { getConversationMetadataEventFromDomEvent } from "@/lib/chatConversationMetadataEvents";
@@ -223,6 +226,18 @@ export function useChatSidebarHistory({
 
   const hasMoreConversations = hasMoreSidebarConversations(conversations.length, conversationNextOffset, conversationTotal, conversationHasMore);
 
+  const applyConversationActivity = useCallback((detail: ChatSidebarActivityUpdate) => {
+    setConversations((prev) => applySidebarConversationActivity(prev, detail));
+  }, [setConversations]);
+
+  const patchConversation = useCallback((id: number, patch: Partial<SidebarConversation>) => {
+    setConversations((prev) => patchSidebarConversation(prev, id, patch));
+  }, [setConversations]);
+
+  const removeConversation = useCallback((id: number) => {
+    setConversations((prev) => removeSidebarConversation(prev, id));
+  }, [setConversations]);
+
   const loadMoreConversations = useCallback(async () => {
     if (loadingMoreConversations || !hasMoreConversations) return;
     setLoadingMoreConversations(true);
@@ -250,35 +265,48 @@ export function useChatSidebarHistory({
       }
       const conv = normalizeConversation(detail);
       if (!isMainChatConversation(conv, hiddenSkillKeys)) return;
-      setConversations((prev) => mergeSidebarConversations(prev.filter((item) => item.id !== conv.id), [conv]));
+      applyConversationActivity({ ...conv, source: "created" });
     };
     window.addEventListener("conversation-created", handleCreated);
     return () => window.removeEventListener("conversation-created", handleCreated);
-  }, [hiddenSkillKeys, loadConversations, setConversations]);
+  }, [applyConversationActivity, hiddenSkillKeys, loadConversations]);
 
   useEffect(() => {
     const handleRenamed = (event: Event) => {
       const metadata = getConversationMetadataEventFromDomEvent(event);
       if (!metadata || metadata.title == null) return;
-      setConversations((prev) => prev.map((item) => item.id === metadata.id ? { ...item, title: metadata.title! } : item));
+      applyConversationActivity({ ...metadata, source: metadata.source || "manual-rename" });
     };
     window.addEventListener("conversation-renamed", handleRenamed);
     return () => window.removeEventListener("conversation-renamed", handleRenamed);
-  }, [setConversations]);
+  }, [applyConversationActivity]);
 
   useEffect(() => {
     const handleUpdated = (event: Event) => {
       const metadata = getConversationMetadataEventFromDomEvent(event);
       if (!metadata) return;
-      setConversations((prev) => applySidebarConversationActivity(prev, metadata));
+      applyConversationActivity(metadata);
     };
     window.addEventListener("conversation-updated", handleUpdated);
     return () => window.removeEventListener("conversation-updated", handleUpdated);
-  }, [setConversations]);
+  }, [applyConversationActivity]);
+
+  useEffect(() => {
+    const handleDeleted = (event: Event) => {
+      const metadata = getConversationMetadataEventFromDomEvent(event);
+      if (!metadata) return;
+      removeConversation(metadata.id);
+    };
+    window.addEventListener("conversation-deleted", handleDeleted);
+    return () => window.removeEventListener("conversation-deleted", handleDeleted);
+  }, [removeConversation]);
 
   return {
     conversations,
     setConversations,
+    applyConversationActivity,
+    patchConversation,
+    removeConversation,
     loading,
     setLoading,
     loadConversations,

@@ -40,6 +40,9 @@ export function useChatConversationCreateRuntime({
       const token = getToken();
       if (!shouldCreateConversation({ token })) return undefined;
 
+      const clientTempId = `chat-create-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const tempConversationId = -Date.now();
+      const optimisticUpdatedAt = new Date().toISOString();
       try {
         const body = buildCreateConversationBody({
           title,
@@ -47,12 +50,28 @@ export function useChatConversationCreateRuntime({
           skillKey: sk,
           workspaceId: getWorkspaceId(),
         });
+        if (!notebookId) {
+          dispatchWindowEvent(new CustomEvent("conversation-updated", {
+            detail: {
+              id: tempConversationId,
+              client_temp_id: clientTempId,
+              title,
+              model,
+              skill_key: sk,
+              source: "local-create",
+              updated_at: optimisticUpdatedAt,
+            },
+          }));
+        }
         const data = await runCreateConversationRequest({
           apiBaseUrl,
           token: token as string,
           body,
         });
-        if (!data) return undefined;
+        if (!data) {
+          if (!notebookId) dispatchWindowEvent(new CustomEvent("conversation-deleted", { detail: { id: tempConversationId } }));
+          return undefined;
+        }
 
         setCreatedConversation(data.id, resolveCreatedConversationTitle(data, title));
         replaceHistory(buildCreatedConversationUrl({
@@ -61,11 +80,12 @@ export function useChatConversationCreateRuntime({
           skillKey: sk,
         }));
         if (!notebookId) {
-          dispatchWindowEvent(new CustomEvent("conversation-created", { detail: data }));
+          dispatchWindowEvent(new CustomEvent("conversation-created", { detail: { ...data, client_temp_id: clientTempId, replaceClientTempId: clientTempId } }));
         }
         return data.id;
       } catch (err) {
         console.error("createConversation error:", err);
+        if (!notebookId) dispatchWindowEvent(new CustomEvent("conversation-deleted", { detail: { id: tempConversationId } }));
         return undefined;
       }
     },

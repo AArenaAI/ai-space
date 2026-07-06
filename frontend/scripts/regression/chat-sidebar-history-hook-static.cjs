@@ -17,6 +17,8 @@ assert.ok(hook.includes('export function useChatSidebarHistory'), 'shared sideba
 assert.ok(hook.includes('conversation-created'), 'hook should own conversation-created updates');
 assert.ok(hook.includes('conversation-renamed'), 'hook should own conversation-renamed updates');
 assert.ok(hook.includes('conversation-updated'), 'hook should own conversation-updated updates');
+assert.ok(hook.includes('conversation-deleted'), 'hook should own conversation-deleted cleanup for failed optimistic creates');
+assert.ok(hook.includes('patchConversation') && hook.includes('removeConversation') && hook.includes('applyConversationActivity'), 'hook should expose one optimistic sidebar action pipeline');
 assert.ok(hook.includes('before_activity_at') && hook.includes('before_id'), 'hook should own cursor pagination params');
 assert.ok(hook.includes('chat-bootstrap-ready'), 'hook should merge bootstrap sidebar payloads');
 assert.ok(metadataEvents.includes('normalizeConversationMetadataEventDetail'), 'shared conversation metadata event normalizer should exist');
@@ -34,8 +36,9 @@ assert.ok(
 );
 assert.ok(
   hook.includes('getConversationMetadataEventFromDomEvent')
-    && hook.includes('applySidebarConversationActivity(prev, metadata)'),
-  'sidebar history should consume shared conversation metadata events'
+    && hook.includes('applyConversationActivity(metadata)')
+    && hook.includes('applySidebarConversationActivity(prev, detail)'),
+  'sidebar history should consume shared conversation metadata events through the shared optimistic pipeline'
 );
 assert.ok(
   useChat.includes('getConversationMetadataEventFromDomEvent')

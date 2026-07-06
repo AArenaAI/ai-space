@@ -27,7 +27,6 @@ import InputDialog from "@/components/ui/InputDialog";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
-import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
 import { apiFetch, apiJson } from "@/lib/api/client";
 import { logoutBrowserSession } from "@/lib/auth/state";
@@ -64,10 +63,6 @@ function groupConversationsByTime(conversations: Conversation[]): Record<string,
 }
 
 const GROUP_ORDER = ["今天", "昨天", "七天内", "30天内"];
-
-function sortConversations(conversations: Conversation[]): Conversation[] {
-  return sortSidebarConversations(conversations);
-}
 
 function sortGroupLabels(labels: string[]): string[] {
   const fixed = GROUP_ORDER.filter((g) => labels.includes(g));
@@ -197,6 +192,25 @@ export default function MobileNav() {
   useEffect(() => {
     setCurrentConvId(routeConvId);
   }, [routeConvId]);
+
+  const isSidebarConversationActive = useCallback((conv: Conversation) => {
+    return String(conv.id) === currentConvId || (!!conv.canonical_id && String(conv.canonical_id) === currentConvId);
+  }, [currentConvId]);
+
+  useEffect(() => {
+    const handleCreateHighlight = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      const id = detail?.id ?? detail?.conversationId;
+      if (!id) return;
+      if (detail?.source === "local-create" || detail?.replaceClientTempId) setCurrentConvId(String(id));
+    };
+    window.addEventListener("conversation-updated", handleCreateHighlight);
+    window.addEventListener("conversation-created", handleCreateHighlight);
+    return () => {
+      window.removeEventListener("conversation-updated", handleCreateHighlight);
+      window.removeEventListener("conversation-created", handleCreateHighlight);
+    };
+  }, []);
   useEffect(() => { const s = localStorage.getItem("user"); if (s) try { setUser(JSON.parse(s)); } catch {} }, []);
 
   useEffect(() => {
@@ -215,6 +229,8 @@ export default function MobileNav() {
   const {
     conversations,
     setConversations,
+    patchConversation,
+    removeConversation,
     loading,
     hasMoreConversations,
     loadMoreConversations,
@@ -243,10 +259,11 @@ export default function MobileNav() {
 
   const handleDelete = async (id: number) => {
     try {
-      await apiFetch(`/conversations/${id}`, { method: "DELETE" });
-      const next = conversations.filter(c => c.id !== id);
-      setConversations(next);
-      if (String(id) === currentConvId) router.push("/chat", { scroll: false });
+      const res = await apiFetch(`/conversations/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        removeConversation(id);
+        if (String(id) === currentConvId) router.push("/chat", { scroll: false });
+      }
     } catch {}
     setDeleteTarget(null);
   };
@@ -254,17 +271,15 @@ export default function MobileNav() {
     if (!renameTarget) return;
     try {
       const u = await apiJson<Conversation>(`/conversations/${renameTarget.id}`, { method: "PUT", body: JSON.stringify({ title: newTitle }) });
-      const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c);
-      setConversations(next);
-      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } }));
+      patchConversation(u.id, { title: u.title, title_pending: false, updated_at: u.updated_at });
+      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title, source: "manual-rename" } }));
     } catch {}
     setRenameTarget(null);
   };
   const handleTogglePin = async (conv: Conversation) => {
     try {
       const u = await apiJson<Conversation>(`/conversations/${conv.id}`, { method: "PUT", body: JSON.stringify({ pinned: !conv.pinned }) });
-      const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c));
-      setConversations(next);
+      patchConversation(u.id, { pinned: u.pinned, updated_at: u.updated_at });
     } catch {}
   };
   const handleShareConv = (conv: Conversation) => { const url = `${window.location.origin}/chat?id=${conv.id}`; navigator.clipboard.writeText(url); };
@@ -334,10 +349,10 @@ export default function MobileNav() {
                         <div className="px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider">置顶</div>
                         <div className="space-y-0.5">
                           {pinned.map(conv => {
-                            const isActive = String(conv.id) === currentConvId;
+                            const isActive = isSidebarConversationActive(conv);
                             return (
                               <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors", isActive ? "bg-surface-card text-text-primary" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
-                                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-text-tertiary" /><Pin className="w-3 h-3 shrink-0 text-brand" /><span className="flex-1 truncate text-left">{conv.title || "新对话"}</span>
+                                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-text-tertiary" /><Pin className="w-3 h-3 shrink-0 text-brand" /><span className={cn("flex-1 truncate text-left", conv.title_pending && "text-text-tertiary animate-pulse")}>{conv.title || "新对话"}</span>
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShareConv(conv)} onDelete={() => setDeleteTarget(conv.id)} /></div>
                               </div>
                             );
@@ -350,10 +365,10 @@ export default function MobileNav() {
                         <div className="px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider">{label}</div>
                         <div className="space-y-0.5">
                           {groups[label].map(conv => {
-                            const isActive = String(conv.id) === currentConvId;
+                            const isActive = isSidebarConversationActive(conv);
                             return (
                               <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors", isActive ? "bg-surface-card text-text-primary" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
-                                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-text-tertiary" /><span className="flex-1 truncate text-left">{conv.title || "新对话"}</span>
+                                <MessageSquare className="w-3.5 h-3.5 shrink-0 text-text-tertiary" /><span className={cn("flex-1 truncate text-left", conv.title_pending && "text-text-tertiary animate-pulse")}>{conv.title || "新对话"}</span>
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShareConv(conv)} onDelete={() => setDeleteTarget(conv.id)} /></div>
                               </div>
                             );

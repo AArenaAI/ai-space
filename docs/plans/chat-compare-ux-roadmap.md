@@ -3,7 +3,7 @@
 > **来源:** 2026-07-03 用户粘贴的 Chat/Compare 后续优化清单。
 > **目标:** 按“稳定感 → 可控感 → 阅读效率 → 长远架构”推进 Chat / Compare，不再零散修 bug。
 > **文档定位:** 本文件是路线图；回测标准放在 `docs/testing/`；具体实施方案放在 `docs/plans/*-plan.md`。
-> **最近更新:** 2026-07-06，根据 Chat pending / accepted send / Compare live / P3 阅读定位与 Compare 长回答操作回归刷新状态。
+> **最近更新:** 2026-07-06，根据 Chat pending / accepted send / Compare live / P3 阅读定位、Compare 长回答操作回归与 P4 侧栏历史 optimistic pipeline 刷新状态。
 > **状态口径:**
 > - ✅ 已完成：已有提交、回归或线上验证支撑。
 > - 🟡 部分完成：已有基础能力或局部修复，但还未达到目标体验。
@@ -35,7 +35,7 @@
 | P1 | 发送后的稳定感 | ✅ | accepted-send contract、pending 单灰点、Stop/switch/reload、真实完整回复、真实 Compare、`test:chat-live-full` 均已通过；长期 identity/merge 问题归入 P5。 |
 | P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化、当前 DOM marker、真实 Compare 双列 Activity inline/split 均有 live 回归覆盖。 |
 | P3 | 阅读效率 | ✅/🟡 | 桌面 Chat/Compare 阅读定位主线已完成：message 精确回跳、block-level jump、高亮、code/table block-local 回归、Compare 长回答 action 可达；移动端 Compare 与收藏片段仍后置。 |
-| P4 | 侧栏/历史体验 | 🟡 | “发送后会话移动到今天”等已修，hook 化未做。 |
+| P4 | 侧栏/历史体验 | ✅ | `useChatSidebarHistory` 已抽出并补齐 optimistic pipeline：新会话 temp→canonical 原地替换、标题弱 pending、active 高亮连续、rename/delete/pin 统一更新、load-more 锚点保护与 fixture 覆盖。 |
 | P5 | 长期状态架构 | 🟡 | Markdown 渲染长期主干已落地为 `StableMarkdownRenderer`；ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
 
 ---
@@ -449,7 +449,7 @@ npm run test:chat-activity-sources
 
 ### 10. 抽 `useChatSidebarHistory()`
 
-**状态:** ✅ 已完成适配层，后续只补专项 fixture
+**状态:** ✅ 已完成并补专项 fixture
 
 **附件目标:**
 
@@ -468,9 +468,9 @@ npm run test:chat-activity-sources
   - workspace filter
   - loading more
 
-**待做:**
+**已验证:**
 
-- 为 hook 写 fixture 测试：bootstrap + event + cursor + optimistic reorder。
+- `npm run test:chat-sidebar-history-hook` 覆盖静态约束与行为 reducer：bootstrap/event/cursor/optimistic reorder、temp→canonical 原地替换、pin patch reorder、remove cleanup。
 
 **补充优化项:**
 
@@ -495,19 +495,21 @@ const {
 
 ### 11. 侧栏实时状态更清晰
 
-**状态:** 🟡 部分完成
+**状态:** ✅ 已完成主线
 
 **已完成:**
 
 - 发送后会话移动到今天已修。
+- 新生成会话在创建请求发出前插入本地 temp row，显示弱 `title_pending` 状态。
+- 服务端 id 返回后按 `client_temp_id` 原地替换为 canonical row，避免重复项和跳位。
+- 当前 active conversation 高亮兼容 temp id / canonical id，创建期间不丢高亮。
+- `loadMoreConversations` 继续使用 `captureAnchor` / `restoreAnchor` 保护侧栏滚动锚点。
+- 删除 / 重命名 / 置顶统一通过 `patchConversation` / `removeConversation` / `applyConversationActivity` optimistic pipeline。
+- 创建失败会发 `conversation-deleted` 清理临时 row。
 
-**未完成:**
+**后续仅可选微调:**
 
-- 新生成会话立即在侧栏出现 skeleton / title。
-- 标题生成后平滑替换。
-- 当前 active conversation 始终高亮。
-- 加载更多历史不造成当前列表重排。
-- 删除 / 重命名 / 置顶走同一 optimistic pipeline。
+- 标题 pending 的视觉强弱可按实际反馈微调；当前使用低干扰 `text-text-tertiary animate-pulse`。
 
 **补充优化项:**
 

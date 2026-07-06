@@ -402,6 +402,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const routeConvId = searchParams?.get("id");
   const effectiveRouteConvId = routeConvId || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null);
   const currentConvId = optimisticConvId ?? routeConvId;
+  const isSidebarConversationActive = useCallback((conv: Conversation) => {
+    return String(conv.id) === currentConvId || (!!conv.canonical_id && String(conv.canonical_id) === currentConvId);
+  }, [currentConvId]);
+  useEffect(() => {
+    if (routeConvId) setOptimisticConvId(null);
+  }, [routeConvId]);
   const router = useRouter();
   const { chatBootstrap } = useAppBootstrap();
   const isGaokaoRoute = isPathInGroup(pathname, ["/gaokao-volunteer"]);
@@ -473,6 +479,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const {
     conversations,
     setConversations,
+    patchConversation,
+    removeConversation,
     loading,
     loadConversations,
     hasMoreConversations,
@@ -873,6 +881,21 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     return () => window.removeEventListener("keydown", handler);
   }, [isMac, searchOpen, skillKey]);
 
+  useEffect(() => {
+    const handleCreateHighlight = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      const id = detail?.id ?? detail?.conversationId;
+      if (!id) return;
+      if (detail?.source === "local-create" || detail?.replaceClientTempId) setOptimisticConvId(String(id));
+    };
+    window.addEventListener("conversation-updated", handleCreateHighlight);
+    window.addEventListener("conversation-created", handleCreateHighlight);
+    return () => {
+      window.removeEventListener("conversation-updated", handleCreateHighlight);
+      window.removeEventListener("conversation-created", handleCreateHighlight);
+    };
+  }, []);
+
   const handleDelete = (id: number) => { setDeleteTarget(id); };
 
   const confirmDelete = async () => {
@@ -882,8 +905,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
       if (r.ok) {
         invalidateConversationSnapshot(deleteTarget);
         deletePersistentConversationSnapshot(deleteTarget);
-        const next = conversations.filter(c => c.id !== deleteTarget);
-        setConversations(next);
+        removeConversation(deleteTarget);
         if (String(deleteTarget) === currentConvId) {
           if (skillKey) {
             router.push(`/skills/chat?key=${skillKey}`);
@@ -900,9 +922,8 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
     if (!renameTarget) return;
     try {
       const u = await apiJson<Conversation>(`/conversations/${renameTarget.id}`, { method: "PUT", body: JSON.stringify({ title: newTitle }) });
-      const next = conversations.map(c => c.id === u.id ? { ...c, title: u.title } : c);
-      setConversations(next);
-      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title } }));
+      patchConversation(u.id, { title: u.title, title_pending: false, updated_at: u.updated_at });
+      window.dispatchEvent(new CustomEvent("conversation-renamed", { detail: { id: u.id, title: u.title, source: "manual-rename" } }));
     } catch {}
     setRenameTarget(null);
   };
@@ -910,8 +931,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   const handleTogglePin = async (conv: Conversation) => {
     try {
       const u = await apiJson<Conversation>(`/conversations/${conv.id}`, { method: "PUT", body: JSON.stringify({ pinned: !conv.pinned }) });
-      const next = sortConversations(conversations.map(c => c.id === u.id ? { ...c, pinned: u.pinned } : c));
-      setConversations(next);
+      patchConversation(u.id, { pinned: u.pinned, updated_at: u.updated_at });
     } catch {}
   };
 
@@ -1067,7 +1087,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             <div className="px-3 py-1 text-[11px] font-medium text-text-tertiary uppercase tracking-wider">{t("sidebar.pinned")}</div>
             <div className="space-y-0.5">
               {pinned.map(conv => {
-                const isActive = String(conv.id) === currentConvId;
+                const isActive = isSidebarConversationActive(conv);
                 const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
                 const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                 const iconColor = isActive
@@ -1077,7 +1097,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onPointerDown={() => { void prefetchConversationImmediately(conv, true); }} onFocus={() => { void prefetchConversationImmediately(conv); }} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
                     <Pin className="w-3 h-3 shrink-0 text-brand" />
-                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
+                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium", conv.title_pending && "text-text-tertiary animate-pulse")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
                   </div>
                 );
@@ -1107,7 +1127,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             {isExpanded && (
             <div className="space-y-0.5">
               {groups[label].map(conv => {
-                const isActive = String(conv.id) === currentConvId;
+                const isActive = isSidebarConversationActive(conv);
                 const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
                 const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                 const iconColor = isActive
@@ -1116,7 +1136,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 return (
                   <div key={conv.id} role="button" tabIndex={0} data-conversation-row data-conversation-id={conv.id} onMouseEnter={() => scheduleConversationHoverPrefetch(conv)} onMouseLeave={cancelConversationHoverPrefetch} onPointerDown={() => { void prefetchConversationImmediately(conv, true); }} onFocus={() => { void prefetchConversationImmediately(conv); }} onClick={() => handleOpenConversation(conv)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleOpenConversation(conv); } }} className={cn("group flex w-full cursor-pointer items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all duration-200", isActive ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                     <IconComp className={cn("w-3.5 h-3.5 shrink-0 transition-all duration-200", iconColor)} />
-                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium")}>{conv.title || t("sidebar.empty.new_chat")}</span>
+                    <span className={cn("flex-1 truncate text-left", isActive && "font-medium", conv.title_pending && "text-text-tertiary animate-pulse")}>{conv.title || t("sidebar.empty.new_chat")}</span>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity"><ConvMenu onRename={() => setRenameTarget(conv)} onTogglePin={() => handleTogglePin(conv)} pinned={conv.pinned} onShare={() => handleShare(conv)} onDelete={() => handleDelete(conv.id)} /></div>
                   </div>
                 );
