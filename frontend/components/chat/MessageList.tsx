@@ -1019,6 +1019,9 @@ function MessageList({
     });
   }, [messages, groupByMessageId, aggregateGroupByUserId, groupViews]);
 
+  const exactTargetMessage = targetMessageId
+    ? allVisibleMessages.find((message) => message.serverMessageId === targetMessageId || String(message.id) === String(targetMessageId))
+    : undefined;
   const targetGroup = targetMessageId
     ? groups.find((group) =>
       group.userMessage.serverMessageId === targetMessageId
@@ -1026,10 +1029,7 @@ function MessageList({
       || group.assistantMessages.some((message) => message.serverMessageId === targetMessageId || String(message.id) === String(targetMessageId))
     )
     : undefined;
-  const targetAnchorMessage = targetGroup?.userMessage
-    ?? (targetMessageId
-      ? allVisibleMessages.find((message) => message.serverMessageId === targetMessageId || String(message.id) === String(targetMessageId))
-      : undefined);
+  const targetAnchorMessage = exactTargetMessage ?? targetGroup?.userMessage;
   const contentWeight = useMemo(() => getMessageContentWeight(allVisibleMessages), [allVisibleMessages]);
   const isContentHeavyConversation =
     contentWeight.totalChars >= CONTENT_HEAVY_TOTAL_CHARS_THRESHOLD ||

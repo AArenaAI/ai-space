@@ -122,7 +122,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => router.push(`/chat?id=${item.conv_id}`, { scroll: false })}
+            onClick={() => router.push(`/chat?id=${item.conv_id}&message=${item.message_id}`, { scroll: false })}
             className="p-1.5 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
             title={t("favorites.backToConversation")}
           >

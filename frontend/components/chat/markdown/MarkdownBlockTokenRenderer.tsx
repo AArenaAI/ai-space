@@ -73,7 +73,7 @@ export default function MarkdownBlockTokenRenderer({ token, nested = false, bloc
 
   if (token.type === "table") {
     return (
-      <div {...blockProps} data-md-enhance-policy="block-local" data-md-enhance-stage="stable" className={`${anchorClassName} my-4 max-w-full overflow-x-auto rounded-xl border border-surface-border bg-surface-card/40 [scrollbar-gutter:stable]`}>
+      <div {...blockProps} data-testid="markdown-table-block" data-md-enhance-policy="block-local" data-md-enhance-stage="stable" className={`${anchorClassName} my-4 max-w-full overflow-x-auto rounded-xl border border-surface-border bg-surface-card/40 [scrollbar-gutter:stable]`}>
         <table className="min-w-full border-collapse text-left text-sm text-text-primary">
           {token.header.length > 0 && (
             <thead className="sticky top-0 z-[1] bg-surface-elevated/95 text-text-secondary backdrop-blur">

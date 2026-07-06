@@ -62,7 +62,7 @@ async function getActiveOverviewId(page) {
 
   try {
     await page.addInitScript(() => localStorage.setItem("theme", "dark"));
-    const response = await page.goto(`${baseUrl}/test-chat-message-overview/`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const response = await page.goto(`${baseUrl}/test-chat-message-overview`, { waitUntil: "domcontentloaded", timeout: 60_000 });
     assert.ok(response && response.status() < 400, `unexpected status ${response?.status()}`);
     await page.waitForSelector('[data-testid="chat-message-overview-fixture"]', { state: "attached", timeout: 20_000 });
     await page.waitForFunction(() => {
@@ -184,6 +184,39 @@ async function getActiveOverviewId(page) {
     });
     assert.equal(savedOverviewAnchor?.anchorMessageId, targetId, `overview click should persist the target message as scroll anchor: ${JSON.stringify(savedOverviewAnchor)}`);
     assert.equal(typeof savedOverviewAnchor?.anchorOffset, 'number', `overview click should persist anchor offset: ${JSON.stringify(savedOverviewAnchor)}`);
+
+    await page.click('[data-testid="overview-target-assistant"]');
+    await page.waitForTimeout(500);
+    const targetedAssistant = await page.evaluate(() => {
+      const assistant = document.querySelector('[data-chat-message-row="true"][data-server-message-id="4"]');
+      const pairedUser = document.querySelector('[data-chat-message-row="true"][data-server-message-id="3"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
+      const assistantRect = assistant?.getBoundingClientRect();
+      const userRect = pairedUser?.getBoundingClientRect();
+      const scrollerRect = scroller?.getBoundingClientRect();
+      const assistantCenter = assistantRect ? assistantRect.top + assistantRect.height / 2 : -1;
+      const scrollerCenter = scrollerRect ? scrollerRect.top + scrollerRect.height / 2 : -1;
+      return {
+        assistantFound: Boolean(assistant),
+        userFound: Boolean(pairedUser),
+        assistantHighlighted: assistant?.className.includes('bg-brand/10') ?? false,
+        userHighlighted: pairedUser?.className.includes('bg-brand/10') ?? false,
+        assistantTop: assistantRect?.top ?? -1,
+        assistantBottom: assistantRect?.bottom ?? -1,
+        userTop: userRect?.top ?? -1,
+        scrollerTop: scrollerRect?.top ?? 0,
+        scrollerBottom: scrollerRect?.bottom ?? 0,
+        centerDelta: Math.abs(assistantCenter - scrollerCenter),
+        scrollerHeight: scrollerRect?.height ?? 0,
+      };
+    });
+    assert.ok(targetedAssistant.assistantFound, `targeted assistant row should be rendered: ${JSON.stringify(targetedAssistant)}`);
+    assert.ok(targetedAssistant.assistantHighlighted, `targetMessageId should highlight the exact assistant message, not only its user group: ${JSON.stringify(targetedAssistant)}`);
+    assert.equal(targetedAssistant.userHighlighted, false, `paired user should not be highlighted for assistant target: ${JSON.stringify(targetedAssistant)}`);
+    assert.ok(targetedAssistant.assistantTop >= targetedAssistant.scrollerTop && targetedAssistant.assistantBottom <= targetedAssistant.scrollerBottom, `targeted assistant should be in viewport: ${JSON.stringify(targetedAssistant)}`);
+    assert.ok(targetedAssistant.centerDelta <= Math.max(64, targetedAssistant.scrollerHeight * 0.12), `targeted assistant should be near centered: ${JSON.stringify(targetedAssistant)}`);
+    await page.click('[data-testid="overview-clear-target"]');
+    await page.waitForTimeout(120);
 
     // Let the click-jump active lock expire before testing passive scroll active-marker timing.
     await page.waitForTimeout(950);

@@ -40,6 +40,7 @@ const singleTurnMessages = makeTurn(1);
 
 export default function ChatMessageOverviewFixture() {
   const [mode, setMode] = useState<"normal" | "single" | "select" | "compare" | "many">("normal");
+  const [targetMessageId, setTargetMessageId] = useState<number | undefined>(undefined);
   const messages = mode === "single" ? singleTurnMessages : mode === "many" ? manyMessages : allMessages;
   const isCompare = mode === "compare";
   const compareModels = useMemo(() => isCompare ? ["deepseek-chat", "gpt-fixture"] : [], [isCompare]);
@@ -54,6 +55,8 @@ export default function ChatMessageOverviewFixture() {
         <button type="button" data-testid="overview-mode-select" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("select")}>select</button>
         <button type="button" data-testid="overview-mode-compare" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("compare")}>compare</button>
         <button type="button" data-testid="overview-mode-many" className="rounded border border-surface-border px-2 py-1" onClick={() => setMode("many")}>many</button>
+        <button type="button" data-testid="overview-target-assistant" className="rounded border border-surface-border px-2 py-1" onClick={() => setTargetMessageId(4)}>target assistant #2</button>
+        <button type="button" data-testid="overview-clear-target" className="rounded border border-surface-border px-2 py-1" onClick={() => setTargetMessageId(undefined)}>clear target</button>
       </div>
       <div className="flex min-h-0 flex-1">
         <MessageList
@@ -63,6 +66,7 @@ export default function ChatMessageOverviewFixture() {
           conversationId={conversationId}
           isCompare={isCompare}
           compareModels={compareModels}
+          targetMessageId={targetMessageId}
           onSelectModeChange={(mode === "select") ? () => {} : undefined}
         />
       </div>
