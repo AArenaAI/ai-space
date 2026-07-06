@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 const { chromium } = require('playwright');
 
 async function jsonFetch(url, options = {}) {
@@ -319,6 +319,8 @@ function analyzeRound(samples) {
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
+  const apiBaseUrl = env('JITTER_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('JITTER_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const model = env('JITTER_MODEL', env('REAL_CHAT_MODEL', 'deepseek-v4-flash'));
   const scenario = env('JITTER_SCENARIO', 'short');
   const switchback = env('JITTER_SWITCHBACK', '0') === '1';
@@ -326,30 +328,29 @@ function analyzeRound(samples) {
   const durationMs = Math.max(800, Number(env('JITTER_SAMPLE_MS', scenario === 'short' ? '4200' : '9000')));
   const settleMs = Math.max(300, Number(env('JITTER_SETTLE_SAMPLE_MS', scenario === 'short' ? '1200' : '3500')));
   const intervalMs = Math.max(30, Number(env('JITTER_INTERVAL_MS', '50')));
-  const auth = await login({ baseUrl });
-  const conversation = await createConversation(baseUrl, auth.token, model);
-  const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  if (auth.refreshToken) {
-    await context.addCookies([{ name: 'ai_space_refresh_token', value: auth.refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' }]);
-  }
-  const page = await context.newPage();
+  const auth = await login({ baseUrl: apiBaseUrl });
+  const conversation = await createConversation(apiBaseUrl, auth.token, model);
+  const { browser, page } = await openAuthedPage({
+    baseUrl: frontendBaseUrl,
+    token: auth.token,
+    user: auth.user,
+    sessionToken: auth.sessionToken,
+    refreshToken: auth.refreshToken,
+    viewport: { width: 1440, height: 1000 },
+  });
   const consoleEvents = [];
   const pageErrors = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
-  await page.addInitScript(({ token, user, model }) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
+  await page.addInitScript(({ model }) => {
     localStorage.setItem('selected-model', model);
     localStorage.setItem('reasoning-mode', 'fast');
     localStorage.setItem('reasoning-enabled', 'false');
     localStorage.setItem('search-enabled', 'false');
     localStorage.setItem('theme', 'dark');
-  }, { token: auth.token, user: auth.user, model });
+  }, { model });
   await page.addInitScript(installSampler);
-  await page.goto(`${baseUrl}/chat/?id=${conversation.id}&jitter_probe=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`${frontendBaseUrl}/chat/?id=${conversation.id}&jitter_probe=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForSelector('textarea', { state: 'visible', timeout: 30000 });
   await page.waitForTimeout(1200);
 
@@ -360,9 +361,9 @@ function analyzeRound(samples) {
     const activeSamples = await sampleFor(page, round, durationMs, intervalMs, 'active');
     await waitForChatIdle(page);
     if (switchback) {
-      await page.goto(`${baseUrl}/chat/?jitter_switch_target=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(`${frontendBaseUrl}/chat/?jitter_switch_target=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(500);
-      await page.goto(`${baseUrl}/chat/?id=${conversation.id}&jitter_probe=${Date.now()}&switchback=${round}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.goto(`${frontendBaseUrl}/chat/?id=${conversation.id}&jitter_probe=${Date.now()}&switchback=${round}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForSelector('textarea', { state: 'visible', timeout: 30000 });
       await page.waitForTimeout(800);
     }
@@ -400,7 +401,8 @@ function analyzeRound(samples) {
 
   const result = {
     ok: failures.length === 0,
-    baseUrl,
+    apiBaseUrl,
+    frontendBaseUrl,
     conversationId: conversation.id,
     model,
     scenario,
@@ -414,6 +416,9 @@ function analyzeRound(samples) {
     consoleErrors: summarizeConsole(consoleEvents),
     pageErrors,
   };
+  if (env('KEEP_LIVE_CONVERSATIONS') !== '1') {
+    result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] }).catch((error) => [{ ok: false, error: error.message }]);
+  }
   printResult(result);
   if (!result.ok) process.exit(2);
 })().catch((error) => {
