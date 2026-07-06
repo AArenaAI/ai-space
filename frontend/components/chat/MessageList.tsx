@@ -1998,9 +1998,31 @@ function MessageList({
 
 
   const renderHistoryLoadingState = () => (
-    <div className="relative flex-1 min-h-0 overflow-hidden">
-      <ChatHistoryLoadingState />
-      <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />
+    <div className="relative flex-1 min-h-0 overflow-hidden" data-testid="chat-message-list" data-visible-message-count={0} data-all-visible-message-count={0}>
+      <div
+        ref={(el) => handleChatScrollerRef(el)}
+        data-chat-scroll-container="true"
+        className={cn("chat-history-scroll-container right-0 transition-[right] duration-200 ease-out", !isCompare && activeActivityMessage && CHAT_ACTIVITY_PANEL_WIDTH_CLASS)}
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          overflowAnchor: "auto",
+          ...chatHistoryTopMaskStyle,
+        }}
+        onScroll={handleChatScroll}
+        onWheel={(event) => handleUserScrollIntent(event.deltaY)}
+        onTouchMove={() => stopBottomLockForUserBrowse(2500)}
+        data-testid="chat-history-scroll-container"
+      >
+        <div data-testid="chat-history-container" className="min-h-full">
+          <ChatHistoryLoadingState />
+          <div style={{ height: CHAT_BOTTOM_SPACER + (selectMode ? SELECT_MODE_EXTRA_SPACER : 0) }} aria-hidden="true" />
+        </div>
+      </div>
     </div>
   );
 

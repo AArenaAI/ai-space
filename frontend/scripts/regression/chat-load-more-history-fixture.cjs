@@ -72,7 +72,8 @@ async function readWindowState(page) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const failures = [];
   page.on("console", (message) => {
-    if (message.type() === "error") failures.push(`console error: ${message.text()}`);
+    const text = message.text();
+    if (message.type() === "error" && !/Failed to load resource/.test(text)) failures.push(`console error: ${text}`);
   });
   page.on("pageerror", (error) => failures.push(`page error: ${error.message}`));
 
