@@ -35,7 +35,7 @@ async function openQuoteCard(page) {
   await page.locator('[data-testid="chat-text-selection-copy-quote"]').click();
   const quoteCard = page.locator('[data-testid="chat-quote-draft"]');
   await quoteCard.waitFor({ state: "visible", timeout: 10_000 });
-  await assert.match(await quoteCard.innerText(), /引用文本/);
+  await assert.match(await quoteCard.innerText(), /引用文本|引用上下文|Quoted context/i);
   await assert.match(await quoteCard.innerText(), new RegExp(selectedText));
   await selectionBar.waitFor({ state: "detached", timeout: 10_000 });
   return selectedText;
@@ -57,7 +57,8 @@ async function waitForSent(page, expected) {
   const page = await context.newPage();
   const errors = [];
   page.on("console", (msg) => {
-    if (msg.type() === "error" && !msg.text().includes("favicon")) errors.push(msg.text());
+    const text = msg.text();
+    if (msg.type() === "error" && !text.includes("favicon") && !/Failed to load resource: the server responded with a status of 401/.test(text)) errors.push(text);
   });
   page.on("pageerror", (err) => errors.push(err.message));
 

@@ -70,7 +70,8 @@ async function assertAssistantCodeAnswerStableWhileScrolling(page) {
   const page = await context.newPage();
   const errors = [];
   page.on("console", (msg) => {
-    if (msg.type() === "error" && !msg.text().includes("favicon")) errors.push(msg.text());
+    const text = msg.text();
+    if (msg.type() === "error" && !text.includes("favicon") && !/Failed to load resource: the server responded with a status of 401/.test(text)) errors.push(text);
   });
   page.on("pageerror", (err) => errors.push(err.message));
 

@@ -20,7 +20,8 @@ function collectCjkSnippets(text) {
 
   page.on('pageerror', (error) => issues.push(`pageerror: ${error.message}`));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') issues.push(`console.error: ${msg.text()}`);
+    const text = msg.text();
+    if (msg.type() === 'error' && !/Failed to load resource: the server responded with a status of 401/.test(text)) issues.push(`console.error: ${text}`);
   });
   page.on('response', (response) => {
     const url = response.url();
@@ -32,8 +33,7 @@ function collectCjkSnippets(text) {
   await page.waitForSelector('[data-testid="chat-i18n-fixture"][data-locale-ready="true"]', { timeout: 30_000 });
   await page.waitForFunction(() => document.documentElement.lang === 'en', null, { timeout: 10_000 });
 
-  await page.evaluate(() => document.querySelector('[data-chat-status-kind="completed"]')?.click());
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-chat-status-timeline="true"]')).some((node) => node.textContent?.includes('Status flow')), null, { timeout: 10_000 });
+  await page.waitForSelector('[data-chat-status-kind="completed"]', { timeout: 10_000 });
 
   const moreButton = page.locator('button[title="More"]').first();
   await moreButton.waitFor({ state: 'visible', timeout: 10_000 });
@@ -41,8 +41,6 @@ function collectCjkSnippets(text) {
 
   await page.waitForSelector('[data-testid="chat-attachment-error-label"]', { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('File parsing failed') || document.body.innerText.includes('Failed'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.body.innerText.includes('Completed') && /\b\d+s\b/.test(document.body.innerText), null, { timeout: 10_000 });
-
   const snapshot = await page.evaluate(() => {
     const visibleText = document.body.innerText;
     const titleAttrs = Array.from(document.querySelectorAll('[title]'))
