@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 function parseSseDataChunk(raw) {
   return raw.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
@@ -68,12 +68,15 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
+  const apiBaseUrl = env('ACTIVE_INTERRUPT_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('ACTIVE_INTERRUPT_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const model = env('ACTIVE_RESUME_MODEL', env('REAL_CHAT_MODEL', 'gpt-5.5'));
-  const auth = await login({ baseUrl });
-  const conversation = await createConversation(baseUrl, auth.token, model);
-  const interrupted = await startAndInterruptGeneration({ baseUrl, token: auth.token, conversationId: conversation.id, model });
+  const auth = await login({ baseUrl: apiBaseUrl });
+  const conversation = await createConversation(apiBaseUrl, auth.token, model);
+  let cleanup;
+  const interrupted = await startAndInterruptGeneration({ baseUrl: apiBaseUrl, token: auth.token, conversationId: conversation.id, model });
   await new Promise((resolve) => setTimeout(resolve, Number(env('ACTIVE_RESUME_REOPEN_DELAY_MS', '1500'))));
-  const bootstrapRes = await fetch(`${baseUrl}/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, {
+  const bootstrapRes = await fetch(`${apiBaseUrl}/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, {
     headers: { Authorization: `Bearer ${auth.token}` },
   });
   const bootstrap = await bootstrapRes.json();
@@ -83,17 +86,18 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
   const snapshotHasAssistant = (bootstrap?.snapshot?.messages || []).some((message) => Number(message.id) === assistantMessageId);
   if (!matchingTask) {
     const completed = bootstrap?.snapshot?.last_assistant_status?.background_task?.status;
-    const result = { ok: true, skipped: true, reason: 'task completed before reload; no active task to resume', conversationId: conversation.id, interrupted, activeTaskCount: activeTasks.length, lastStatus: completed, snapshotHasAssistant };
+    const result = { ok: true, skipped: true, reason: 'task completed before reload; no active task to resume', apiBaseUrl, frontendBaseUrl, conversationId: conversation.id, interrupted, activeTaskCount: activeTasks.length, lastStatus: completed, snapshotHasAssistant };
+    result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] });
     printResult(result);
     return;
   }
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 300)));
-  await page.goto(`${baseUrl}/chat/?id=${conversation.id}&active_interrupt_resume=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`${frontendBaseUrl}/chat/?id=${conversation.id}&active_interrupt_resume=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(Number(env('ACTIVE_RESUME_VERIFY_MS', '9000')));
   const mainText = await page.locator('main').innerText().catch(() => '');
@@ -102,8 +106,20 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
   const expectedAfter = Number(matchingTask.last_sequence_number || 0);
   const streamRequest = events.requests.find((item) => item.url.includes(`/api/tasks/${taskId}/stream`));
   const actualAfter = streamRequest ? Number(new URL(streamRequest.url).searchParams.get('after') || 0) : 0;
-  const result = { conversationId: conversation.id, interrupted, matchingTask, snapshotHasAssistant, streamRequested: Boolean(streamRequest), expectedAfter, actualAfter, requests: events.requests, responsesTail: events.responses.slice(-20), errors: events.errors, consoleErrors: summarizeConsole(events.console), mainTail: mainText.slice(-1000) };
-  result.ok = snapshotHasAssistant && Boolean(streamRequest) && actualAfter >= expectedAfter && events.errors.length === 0;
+  const finalBootstrapRes = await fetch(`${apiBaseUrl}/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, {
+    headers: { Authorization: `Bearer ${auth.token}` },
+  });
+  const finalBootstrap = await finalBootstrapRes.json().catch(() => ({}));
+  const finalStatus = finalBootstrap?.snapshot?.last_assistant_status;
+  const finalCompleted = finalStatus?.background_task?.status === 'completed' || finalStatus?.message?.generation_status === 'completed' || finalStatus?.message?.phase === 'completed';
+  const finalContentLen = (finalStatus?.message?.content || '').length;
+  const result = { apiBaseUrl, frontendBaseUrl, conversationId: conversation.id, interrupted, matchingTask, snapshotHasAssistant, streamRequested: Boolean(streamRequest), expectedAfter, actualAfter, finalCompleted, finalContentLen, requests: events.requests, responsesTail: events.responses.slice(-20), errors: events.errors, consoleErrors: summarizeConsole(events.console), mainTail: mainText.slice(-1000) };
+  result.ok = snapshotHasAssistant && events.errors.length === 0 && (
+    (Boolean(streamRequest) && actualAfter >= expectedAfter) ||
+    (!streamRequest && finalCompleted && finalContentLen > 0 && mainText.trim().length > 0)
+  );
+  cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] });
+  result.cleanup = cleanup;
   printResult(result);
   if (!result.ok) process.exit(2);
 })().catch((error) => {

@@ -138,13 +138,15 @@ async function sendPromptFromUi(page, prompt) {
   }
 
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
+  const apiBaseUrl = env('P1_STATE_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('P1_STATE_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const model = env('P1_STATE_MODEL', env('REAL_CHAT_MODEL', 'gpt-5.5'));
   const stamp = Date.now();
-  const auth = await login({ baseUrl });
-  const convA = await createConversation(baseUrl, auth.token, `P1 state A ${stamp}`, model);
-  const convB = await createConversation(baseUrl, auth.token, `P1 state B ${stamp}`, model);
+  const auth = await login({ baseUrl: apiBaseUrl });
+  const convA = await createConversation(apiBaseUrl, auth.token, `P1 state A ${stamp}`, model);
+  const convB = await createConversation(apiBaseUrl, auth.token, `P1 state B ${stamp}`, model);
   let cleanup;
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
   const events = { requests: [], responses: [], console: [], errors: [], requestfailed: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.responses.push({ status: res.status(), url: u }); });
@@ -160,7 +162,7 @@ async function sendPromptFromUi(page, prompt) {
       localStorage.setItem('search-enabled', 'false');
       localStorage.setItem('reasoning-enabled', 'false');
     }, { model });
-    await page.goto(`${baseUrl}/chat/?id=${convA.id}&p1_state=${stamp}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(`${frontendBaseUrl}/chat/?id=${convA.id}&p1_state=${stamp}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
 
     await sendPromptFromUi(page, env('P1_STATE_PROMPT', `P1 状态一致性 live probe ${stamp}：请写一篇中文长文，分 10 段说明聊天界面 pending、停止、恢复和切换会话时需要保持稳定。每段不少于 90 字。`));
@@ -189,7 +191,7 @@ async function sendPromptFromUi(page, prompt) {
       samples.push(await sample(page, 'after-idle-wait'));
     }
 
-    const boot = await apiJson(baseUrl, `/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
+    const boot = await apiJson(apiBaseUrl, `/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
     const latest = [...(boot.snapshot?.messages || [])].reverse().find((message) => message.role === 'assistant') || null;
     const analysis = analyze(samples);
     const result = {
@@ -198,7 +200,8 @@ async function sendPromptFromUi(page, prompt) {
         && !analysis.hasStopAfterStopClick
         && events.errors.length === 0
         && summarizeConsole(events.console).filter((item) => item.type === 'error').length === 0,
-      baseUrl,
+      apiBaseUrl,
+      frontendBaseUrl,
       model,
       convA: convA.id,
       convB: convB.id,
@@ -220,14 +223,14 @@ async function sendPromptFromUi(page, prompt) {
       consoleErrors: summarizeConsole(events.console),
       pageErrors: events.errors,
     };
-    cleanup = await cleanupConversations({ baseUrl, token: auth.token, conversationIds: [convA.id, convB.id] });
+    cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [convA.id, convB.id] });
     result.cleanup = cleanup;
     printResult(result);
     if (!result.ok) process.exit(2);
   } finally {
     await browser.close().catch(() => {});
     if (!cleanup) {
-      await cleanupConversations({ baseUrl, token: auth.token, conversationIds: [convA.id, convB.id] }).catch(() => {});
+      await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [convA.id, convB.id] }).catch(() => {});
     }
   }
 })().catch((error) => {
