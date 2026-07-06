@@ -50,6 +50,7 @@ function loadModule(file) {
         cancelGenerationTask: () => undefined,
       };
     }
+    if (specifier === "@/lib/chatRuntime") return { chatStreamOwnerRegistry: { abortConversation(){}, register(){}, canFinalize(){ return true; }, finalize(){ return true; } } };
     if (specifier === "@/lib/chatForkCoordinator") {
       return {
         runForkChatRequest: () => ({}),
@@ -113,7 +114,9 @@ function testStopGenerationUsesBearerAndClearsRefs() {
   const stop = createStopGenerationAction({
     apiBaseUrl: "",
     messages: [{ role: "assistant", generationTaskId: 3 }],
+    currentConversation: 42,
     ...refs,
+    streamOwnerRegistry: { abortConversation: (...args) => calls.push(["owners", ...args]) },
     getToken: () => "tok",
     getGuestId: () => "guest",
     cancelGenerationTask: (args) => calls.push(["cancel", args]),
@@ -121,6 +124,7 @@ function testStopGenerationUsesBearerAndClearsRefs() {
       captured = messages;
       callbacks.cancelTask(3);
       callbacks.abortTaskStreams();
+      callbacks.abortStreamOwners();
       callbacks.setAbortReason("user");
       callbacks.getMainAbortController().abort();
       callbacks.clearMainAbortController();
@@ -138,6 +142,7 @@ function testStopGenerationUsesBearerAndClearsRefs() {
   assert.ok(taskController.aborted);
   assert.ok(mainController.aborted);
   assert.ok(compareController.aborted);
+  assert.deepEqual(calls.find((c) => c[0] === "owners"), ["owners", 42, "stop"]);
 }
 
 function testStopGenerationUsesGuestFallback() {

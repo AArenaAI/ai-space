@@ -21,6 +21,7 @@ import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import type { ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { Message } from "@/lib/chatTypes";
 import { readAuthState } from "@/lib/auth/state";
+import { chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
 
 type AbortReason = "user" | "navigation" | null;
 
@@ -29,10 +30,12 @@ type HeadersRecord = Record<string, string>;
 type StopGenerationDeps = {
   apiBaseUrl: string;
   messages: Message[];
+  currentConversation?: number;
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
   abortControllerRef: MutableRefObject<AbortController | null>;
   compareAbortControllersRef: MutableRefObject<AbortController[]>;
   abortReasonRef: MutableRefObject<AbortReason>;
+  streamOwnerRegistry?: Pick<typeof defaultChatStreamOwnerRegistry, "abortConversation">;
   getToken?: () => string | null;
   getGuestId?: () => string;
   runStopGeneration?: typeof defaultRunStopGeneration;
@@ -42,10 +45,12 @@ type StopGenerationDeps = {
 export function createStopGenerationAction({
   apiBaseUrl,
   messages,
+  currentConversation,
   taskStreamsRef,
   abortControllerRef,
   compareAbortControllersRef,
   abortReasonRef,
+  streamOwnerRegistry = defaultChatStreamOwnerRegistry,
   getToken = () => readAuthState().token,
   getGuestId = defaultGetGuestId,
   runStopGeneration = defaultRunStopGeneration,
@@ -73,6 +78,9 @@ export function createStopGenerationAction({
         abortTaskStreams: () => {
           Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
           taskStreamsRef.current = {};
+        },
+        abortStreamOwners: () => {
+          if (typeof currentConversation === "number") streamOwnerRegistry.abortConversation(currentConversation, "stop");
         },
         getMainAbortController: () => abortControllerRef.current,
         clearMainAbortController: () => {
@@ -377,10 +385,12 @@ export function useChatGenerationControlsRuntime(options: UseChatGenerationContr
     [
       options.apiBaseUrl,
       options.messages,
+      options.currentConversation,
       options.taskStreamsRef,
       options.abortControllerRef,
       options.compareAbortControllersRef,
       options.abortReasonRef,
+      options.streamOwnerRegistry,
       options.getToken,
       options.getGuestId,
       options.runStopGeneration,

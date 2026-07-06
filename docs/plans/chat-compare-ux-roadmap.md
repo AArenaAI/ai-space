@@ -564,7 +564,7 @@ ConversationRuntimeStore
 
 ### 13. Stream ownership 正式化
 
-**状态:** 🟡 第三包已完成真实 task/main stream runtime 接入，后续继续扩展到 Compare/更多 abort 调用点
+**状态:** 🟡 第四包已完成 Stop / conversation-level owner abort 覆盖，后续继续扩展更细的 Compare column owner key
 
 **已完成:**
 
@@ -604,6 +604,12 @@ conversationId -> activeStreams
 - `useChatMainStreamRuntime` 已注册 main stream owner，finally reconciliation 前必须 `canFinalize(owner)`；stale owner 不再 close/reconcile/mark completed。
 - `createStopAllTaskStreamsAction` 会按 active task conversation 调用 `abortConversation(convId, "stop")`，避免 owner 残留。
 - 回归覆盖：task stale owner、main stale owner、stopAll owner abort、正常 fallback/polling 路径保持不变。
+
+**已完成第四包:**
+
+- `runStopGeneration` 增加 `abortStreamOwners` callback，Stop 时与 task streams/controller abort 同步清 owner。
+- `createStopGenerationAction` 接入 `chatStreamOwnerRegistry.abortConversation(currentConversation, "stop")`，覆盖普通 Chat 与 Compare 当前会话级 Stop。
+- 回归覆盖：stop coordinator 必须调用 owner abort、generation controls 通过当前 conversation 清理 owner，同时 Compare run/stream/runtime 回归保持通过。
 
 ---
 

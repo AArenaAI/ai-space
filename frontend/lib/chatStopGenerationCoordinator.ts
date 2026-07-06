@@ -13,6 +13,7 @@ export type StopGenerationController = {
 export type StopGenerationCallbacks = {
   cancelTask: (taskId: number) => void;
   abortTaskStreams: () => void;
+  abortStreamOwners?: () => void;
   getMainAbortController: () => StopGenerationController | null | undefined;
   clearMainAbortController: () => void;
   getCompareAbortControllers: () => StopGenerationController[];
@@ -94,6 +95,7 @@ export function runStopGeneration({
 
   plan.taskIds.forEach((taskId) => callbacks.cancelTask(taskId));
   callbacks.abortTaskStreams();
+  callbacks.abortStreamOwners?.();
 
   if (mainController) {
     callbacks.setAbortReason("user");

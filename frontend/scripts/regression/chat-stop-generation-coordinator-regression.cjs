@@ -115,6 +115,7 @@ async function test(name, fn) {
       callbacks: {
         cancelTask: (taskId) => events.push(["cancel", taskId]),
         abortTaskStreams: () => events.push("task-streams-abort"),
+        abortStreamOwners: () => events.push("owners-abort"),
         getMainAbortController: () => main,
         clearMainAbortController: () => events.push("main-clear"),
         getCompareAbortControllers: () => [compareA, compareB],
@@ -128,6 +129,7 @@ async function test(name, fn) {
       ["cancel", 1],
       ["cancel", 3],
       "task-streams-abort",
+      "owners-abort",
       ["reason", "user"],
       "main-abort",
       "main-clear",
@@ -145,6 +147,7 @@ async function test(name, fn) {
       callbacks: {
         cancelTask: (taskId) => events.push(["cancel", taskId]),
         abortTaskStreams: () => events.push("task-streams-abort"),
+        abortStreamOwners: () => events.push("owners-abort"),
         getMainAbortController: () => null,
         clearMainAbortController: () => events.push("main-clear"),
         getCompareAbortControllers: () => [],
@@ -158,7 +161,7 @@ async function test(name, fn) {
       compareControllerCount: 0,
       shouldSetAbortReason: false,
     });
-    assert.deepEqual(events, ["task-streams-abort"]);
+    assert.deepEqual(events, ["task-streams-abort", "owners-abort"]);
   });
 
   if (!process.exitCode) console.log("\nchat stop generation coordinator regression tests passed");
