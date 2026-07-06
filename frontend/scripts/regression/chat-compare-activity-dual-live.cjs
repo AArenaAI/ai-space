@@ -20,6 +20,16 @@ async function jsonFetch(url, options = {}) {
   return data;
 }
 
+async function deleteConversation({ baseUrl, token, conversationId }) {
+  if (!conversationId || env('KEEP_LIVE_CONVERSATIONS') === '1') return { skipped: true };
+  const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const text = await res.text().catch(() => '');
+  return { status: res.status, ok: res.ok, body: text.slice(0, 200) };
+}
+
 async function streamTaskToDone({ baseUrl, token, taskId }) {
   const res = await fetch(`${baseUrl}/api/tasks/${taskId}/stream?after=0`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -177,6 +187,7 @@ async function inspectActivity(page) {
   const expectSources = env('COMPARE_ACTIVITY_SEARCH', '0') === '1';
   const auth = await login({ baseUrl, email, password });
   const created = await createCompareConversation({ baseUrl, token: auth.token, models, prompt });
+  let cleanup;
 
   const { browser, page } = await openAuthedPage({
     baseUrl,
@@ -190,20 +201,26 @@ async function inspectActivity(page) {
   const pageErrors = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
-  await page.goto(`${baseUrl}/chat/?id=${created.conversation.id}&compare_activity_dual=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(1500);
-  await chooseCompareModeIfNeeded(page);
-  await page.locator('[data-chat-compare-column-shell="true"]').first().waitFor({ state: 'visible', timeout: 20000 });
+  let clickedInline = 0;
+  let inline = {};
+  let split = {};
+  try {
+    await page.goto(`${baseUrl}/chat/?id=${created.conversation.id}&compare_activity_dual=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    await chooseCompareModeIfNeeded(page);
+    await page.locator('[data-chat-compare-column-shell="true"]').first().waitFor({ state: 'visible', timeout: 20000 });
 
-  await selectActivityLayout(page, /列内展开|inline/i);
-  const clickedInline = await clickAllReasoningEntries(page);
-  const inline = await inspectActivity(page);
+    await selectActivityLayout(page, /列内展开|inline/i);
+    clickedInline = await clickAllReasoningEntries(page);
+    inline = await inspectActivity(page);
 
-  await selectActivityLayout(page, /列内侧栏|split/i);
-  const split = await inspectActivity(page);
-
-  await browser.close();
+    await selectActivityLayout(page, /列内侧栏|split/i);
+    split = await inspectActivity(page);
+  } finally {
+    await browser.close().catch(() => {});
+    cleanup = await deleteConversation({ baseUrl, token: auth.token, conversationId: created.conversation.id }).catch((error) => ({ ok: false, error: error.message }));
+  }
 
   const result = {
     ok: clickedInline >= 2
@@ -228,6 +245,7 @@ async function inspectActivity(page) {
     clickedInline,
     inline,
     split,
+    cleanup,
     consoleErrors: summarizeConsole(consoleEvents),
     pageErrors,
   };

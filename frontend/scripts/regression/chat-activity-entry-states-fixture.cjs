@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { DEFAULT_BASE, env, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+
+const baseUrl = (env('CHAT_ACTIVITY_ENTRY_BASE_URL', env('BASE_URL', 'http://127.0.0.1:3210')) || DEFAULT_BASE).replace(/\/+$/, '');
 
 const baseMessages = [
   {
@@ -46,7 +48,7 @@ const baseMessages = [
   await page.addInitScript((messages) => {
     window.__CHAT_ACTIVITY_ENTRY_STATES_FIXTURE__ = messages;
   }, baseMessages);
-  await page.goto('http://127.0.0.1:3210/test-chat-activity-entry-states', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`${baseUrl}/test-chat-activity-entry-states`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForSelector('[data-fixture-ready="true"]', { timeout: 30000 });
   const rows = await page.evaluate(() => Array.from(document.querySelectorAll('[data-fixture-row]')).map((row) => {
     const buttons = Array.from(row.querySelectorAll('button')).map((button) => (button.textContent || '').trim()).filter(Boolean);
@@ -113,6 +115,7 @@ const baseMessages = [
       && pageErrors.length === 0,
     rows,
     panels,
+    baseUrl,
     consoleErrors: summarizeConsole(consoleEvents),
     pageErrors,
   };
