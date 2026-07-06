@@ -22,6 +22,77 @@
 
 ---
 
+## P3 阅读定位 / Compare 长回答补充回测
+
+以下用例用于覆盖桌面 Chat/Compare 阅读效率主线，避免 message / block 回跳、Markdown block-local 增强、Compare 列内操作栏后续回归。
+
+### 用例 A：message / block 回跳定位
+
+**场景**
+
+搜索、收藏、overview 或未来片段入口跳回长回答。
+
+**操作**
+
+1. 打开带多轮长回答的 Chat fixture。
+2. 触发 `targetMessageId` 指向 assistant。
+3. 触发 `targetMessageId + targetBlockId` 指向该 assistant 内部 markdown block。
+
+**预期**
+
+- assistant target 必须高亮精确 assistant row，不应只高亮 paired user。
+- block target 必须优先定位 `data-md-block-id`，并设置 transient `data-md-anchor-restored="true"`。
+- 找不到 block 时回退到 message row，不应空跳或报错。
+- overview 在 single / compare / select / mobile 下仍按既有规则隐藏。
+
+**命令**
+
+```bash
+npm run test:chat-message-overview-fixture
+```
+
+### 用例 B：Markdown block-local 增强
+
+**场景**
+
+完成态 / 历史长回答包含代码块、表格、数学公式、Mermaid。
+
+**预期**
+
+- code/table/math/Mermaid 块保留 `data-md-enhance-policy="block-local"`。
+- table 容器存在 `data-testid="markdown-table-block"`，thead sticky 可检测。
+- 不允许因局部增强替换整条 assistant message。
+- 常见 Markdown 语法不应泄漏 raw markdown。
+
+**命令**
+
+```bash
+npm run test:chat-markdown-coverage-fixture
+npm run test:chat-markdown-code-fixture
+```
+
+### 用例 C：Compare 长回答 action 可达
+
+**场景**
+
+Compare 双列中，一列或两列回答很长，需要列内滚动阅读。
+
+**预期**
+
+- 左半区滚轮交给外层历史滚动，右半区滚轮滚动当前列。
+- 列内 scrollTop 可恢复。
+- 可滚列不在底部时，action row 必须 sticky 且可见。
+- action row 不应横向溢出 compare column frame。
+- 普通 Chat 和短回答不因此常驻大操作栏。
+
+**命令**
+
+```bash
+npm run test:chat-compare-column-scroll-fixture
+```
+
+---
+
 ## 用例 1：发送后 assistant 占位稳定
 
 ### 场景

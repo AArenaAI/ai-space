@@ -505,6 +505,29 @@ expected = final
 
 ---
 
+## 2026-07-06 P3 阅读定位收口状态
+
+本计划仍是 completed / canonical / hydration gate 的长期方案。当前 P3 桌面阅读效率已经先完成以下低风险能力，作为长期方案的边界保护：
+
+- message 精确回跳与 assistant exact highlight，避免搜索 / 收藏回跳只落到 paired user。
+- URL `block` 参数：`/chat?id=...&message=...&block=...`，优先定位 `data-md-block-id`，失败回退 message row。
+- block target 使用 `data-md-anchor-restored="true"` transient highlight，不 remount 整条 Markdown。
+- code/table/math/Mermaid 块已锁定 `data-md-enhance-policy="block-local"`，table 补 `data-testid="markdown-table-block"` 与 sticky header 回归。
+- Compare 长回答 action row 在列可滚且不在底部时 sticky / visible，普通 Chat 与短回答不变。
+
+相关回归：
+
+```bash
+npm run test:chat-message-overview-fixture
+npm run test:chat-markdown-coverage-fixture
+npm run test:chat-markdown-code-fixture
+npm run test:chat-compare-column-scroll-fixture
+```
+
+这些能力不替代长期 hydration gate；后续如果继续做代码块 / 表格独立 IntersectionObserver hydration，仍必须保持 block-local，不得把 completed 作为整条 assistant rich renderer 替换的触发点。
+
+---
+
 ## 不建议的短期粗暴改法
 
 不要直接：

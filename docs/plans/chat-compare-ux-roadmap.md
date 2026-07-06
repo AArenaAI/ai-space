@@ -3,7 +3,7 @@
 > **来源:** 2026-07-03 用户粘贴的 Chat/Compare 后续优化清单。
 > **目标:** 按“稳定感 → 可控感 → 阅读效率 → 长远架构”推进 Chat / Compare，不再零散修 bug。
 > **文档定位:** 本文件是路线图；回测标准放在 `docs/testing/`；具体实施方案放在 `docs/plans/*-plan.md`。
-> **最近更新:** 2026-07-06，根据 Chat pending / accepted send / Compare live / `test:chat-live-full` 验证结果刷新状态。
+> **最近更新:** 2026-07-06，根据 Chat pending / accepted send / Compare live / P3 阅读定位与 Compare 长回答操作回归刷新状态。
 > **状态口径:**
 > - ✅ 已完成：已有提交、回归或线上验证支撑。
 > - 🟡 部分完成：已有基础能力或局部修复，但还未达到目标体验。
@@ -22,6 +22,9 @@
 > - `9f420c2 test(chat): update compare activity live regression`
 > - `5898260 test(chat): harden live regression auth and cleanup`
 > - `63b51a2 test(chat): add live smoke suite and cleanup helpers`
+> - `f9c912b feat(chat): highlight exact message jumps and lock block markdown`
+> - `f442cb7 feat(chat): support block-level jump anchors`
+> - `4c759e7 feat(chat): keep compare actions reachable`
 
 ---
 
@@ -31,7 +34,7 @@
 |---|---|---:|---|
 | P1 | 发送后的稳定感 | ✅ | accepted-send contract、pending 单灰点、Stop/switch/reload、真实完整回复、真实 Compare、`test:chat-live-full` 均已通过；长期 identity/merge 问题归入 P5。 |
 | P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化、当前 DOM marker、真实 Compare 双列 Activity inline/split 均有 live 回归覆盖。 |
-| P3 | 阅读效率 | 🟡 | Activity/来源入口大部分完成；当前下一轮聚焦长消息阅读定位、block anchor、高亮、Compare 长回答操作栏。 |
+| P3 | 阅读效率 | ✅/🟡 | 桌面 Chat/Compare 阅读定位主线已完成：message 精确回跳、block-level jump、高亮、code/table block-local 回归、Compare 长回答 action 可达；移动端 Compare 与收藏片段仍后置。 |
 | P4 | 侧栏/历史体验 | 🟡 | “发送后会话移动到今天”等已修，hook 化未做。 |
 | P5 | 长期状态架构 | 🟡 | Markdown 渲染长期主干已落地为 `StableMarkdownRenderer`；ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
 
@@ -339,7 +342,7 @@ npm run test:chat-compare-model-persistence-live
 
 ### 7. Compare 双列阅读体验继续优化
 
-**状态:** 🟡 部分完成
+**状态:** ✅ 桌面长回答可达性已完成；移动端降级后置
 
 **附件目标:**
 
@@ -350,18 +353,19 @@ npm run test:chat-compare-model-persistence-live
 - Compare 双列方向已改为：外层历史滚动 + 列内答案独立滚动。
 - Activity inline / split 双列均已回归通过。
 - Compare 来源 Activity ownership 已明确到左列 / 右列。
+- Compare 长回答列内滚动时，操作栏保持 sticky / 可见：当列可滚且不在底部时自动显现，短回答和普通 Chat 不变。
+- `npm run test:chat-compare-column-scroll-fixture` 已覆盖右半区列内滚动、左半区页面滚动、scrollTop 恢复、阴影、action row sticky/visible/position。
 
 **未完成:**
 
 - 两列高度差很大时，短列不要空得太突兀。
 - 列内滚动条 / 阴影提示更自然。
 - 当前 active column 更明确。
-- 长回答底部操作不要被列内滚动遮住。
 - 移动端 Compare 降级为 tab 或上下卡片。
 
 **补充优化项:**
 
-- 列内滚动到底部时显示底部操作栏 sticky。
+- 列内长回答 action row 已 sticky；后续只做视觉微调，不再作为阻塞项。
 - 短列可显示轻量占位：`本列回答较短`，但不要抢眼。
 - 移动端断点下：
   - 优先 tab 切模型；
@@ -409,7 +413,7 @@ npm run test:chat-activity-sources
 
 ### 9. 长消息性能和阅读定位
 
-**状态:** 🟡 部分完成，block anchor 第一版已落地
+**状态:** ✅ 桌面定位主线已完成；真实搜索 block 来源产品化后置
 
 **附件目标:**
 
@@ -420,17 +424,22 @@ npm run test:chat-activity-sources
 - 已有 lazy markdown、content visibility、overview 等基础能力。
 - 已新增会话滚动 block anchor：保存 `anchorMessageId + anchorBlockId + anchorOffset`，切会话返回时优先按 `data-md-block-id` 恢复阅读位置，失败再回退 `distanceToBottom / scrollTop`。
 - 新增 live 回归命令：`npm run test:chat-block-anchor-restore-live`。
+- 搜索 / 收藏 / overview 回跳已统一到具体 `message`，assistant 命中时高亮精确 assistant 行而不是只高亮 paired user。
+- URL 已支持 `block` 参数：`/chat?id=...&message=...&block=...`，MessageList 会优先定位 `data-md-block-id`，找不到 block 时回退到 message row。
+- 目标 block 使用轻量 `data-md-anchor-restored="true"` transient highlight，不 remount Markdown。
+- `MarkdownBlockTokenRenderer` 已锁定 code/table/math/Mermaid 的 `data-md-enhance-policy="block-local"`；table 补 `data-testid="markdown-table-block"`，回归覆盖 sticky header 与 block-local policy。
+- `npm run test:chat-message-overview-fixture` 覆盖 message jump、assistant exact target、block target、overview hidden cases。
+- `npm run test:chat-markdown-coverage-fixture` 覆盖 table/code/math/Mermaid block-local 与 raw leak。
 
 **未完成:**
 
 - 大 markdown 渲染分级：首屏 plain/light，进入视口再 rich。
-- 代码块 / table 单独延迟 hydrate。
-- 回到某条消息时高亮稳定，避免二次跳动。
 - 加载历史 prepend 后 scrollTop 锚定继续强化。
+- 真实搜索结果如果提供 `matched_block_id`，前端可把它接到 `block` 参数；当前能力已就绪但搜索索引来源未产品化。
 
 **补充优化项:**
 
-- 给代码块和表格增加独立 IntersectionObserver hydration。
+- 给代码块和表格增加独立 IntersectionObserver hydration 可作为后续性能优化；当前先确保 block-local 增强不替换整条消息。
 - 对超过阈值的 assistant message 先渲染轻量 markdown，再 idle hydrate rich renderer。
 - scroll restore 加入“目标 message id + offset within message”而不是只保存 scrollTop。
 
@@ -627,14 +636,15 @@ conversationId -> activeStreams
 
 ### 第二轮：P3 长消息性能和阅读定位
 
-**状态:** 🟡 下一轮优先执行
+**状态:** ✅ 当前桌面主线已完成，后续转入 testnet 验证 / 搜索 block 来源产品化
 
 任务：
 
-1. 继续强化 block anchor：overview 点击后写入 block anchor；prepend / restore / hydrate 后不二次跳。
-2. 长 Markdown 的代码块 / 表格做块级增强，不替换整条消息。
-3. 回到某条消息时提供轻量稳定高亮，帮助用户确认定位。
-4. 长回答底部操作不要被列内滚动遮住。
+1. ✅ message 精确回跳与 assistant exact highlight。
+2. ✅ URL `block` 参数、block target 定位 / transient highlight / message fallback。
+3. ✅ code/table/math/Mermaid block-local 回归锁定。
+4. ✅ Compare 长回答 action row sticky / visible。
+5. ⏭️ 搜索结果 `matched_block_id` 来源产品化；没有字段时保持 message 级回跳。
 
 **原因:** 目标是“像读文档一样稳”，优先做用户可感知的阅读定位和长内容操作体验。
 
@@ -647,6 +657,7 @@ conversationId -> activeStreams
 - ✅ 视觉稳定 live probe：已新增 5 轮 mixed rich old-row stability stress，覆盖旧消息 DOM/height/text/remount。
 - ✅ Sidebar hook 化：`useChatSidebarHistory()` 已抽出，桌面 / 移动已共用；剩余是 fixture 测试与 optimistic pipeline。
 - ✅ block anchor 第一版：已支持 `anchorMessageId + anchorBlockId + anchorOffset` 恢复阅读位置。
+- ✅ P3 桌面阅读定位：message / block 回跳、高亮、block-local Markdown、Compare 长回答操作可达已完成。
 - ⏬ Compare 移动端体验：按用户要求优先级排到最后，暂不混入 P3 桌面阅读体验。
 
 ---
