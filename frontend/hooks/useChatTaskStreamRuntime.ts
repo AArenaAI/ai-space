@@ -19,7 +19,7 @@ import {
 import type { Message } from "@/lib/chatTypes";
 import { getConversationSnapshot, patchConversationSnapshot } from "@/lib/chatConversationCache";
 import { readAuthState } from "@/lib/auth/state";
-import { chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
+import { chatRuntimeStore, chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
 
 export type TaskStreamActiveState = {
   convId?: number;
@@ -28,6 +28,31 @@ export type TaskStreamActiveState = {
   lastSequence?: number;
   content?: string;
 };
+
+function syncActiveTaskStreamsToRuntime(
+  activeStates: Record<string, TaskStreamActiveState>,
+  touchedConversationIds: Array<number | undefined> = []
+) {
+  const byConversation = new Map<number, Array<[string, TaskStreamActiveState]>>();
+  touchedConversationIds.forEach((conversationId) => {
+    if (typeof conversationId === "number") byConversation.set(conversationId, []);
+  });
+  Object.entries(activeStates).forEach(([localMessageId, state]) => {
+    if (typeof state.convId !== "number") return;
+    const entries = byConversation.get(state.convId) || [];
+    entries.push([localMessageId, state]);
+    byConversation.set(state.convId, entries);
+  });
+  byConversation.forEach((entries, conversationId) => {
+    const activeStreams = Object.fromEntries(entries.map(([localMessageId, state]) => [localMessageId, { ...state }]));
+    const generationTasks = Object.fromEntries(
+      entries
+        .filter(([, state]) => state.generationTaskId)
+        .map(([localMessageId, state]) => [String(state.generationTaskId), { ...state, localMessageId }])
+    );
+    chatRuntimeStore.patchConversation(conversationId, { activeStreams, generationTasks, updatedAt: Date.now() });
+  });
+}
 
 type TaskStreamEventHandler = {
   processEvent: (eventText: string) => void;
@@ -121,6 +146,7 @@ export function createStopAllTaskStreamsAction({
     conversationIds.forEach((convId) => streamOwnerRegistry.abortConversation(convId, "stop"));
     taskStreamsRef.current = {};
     activeTaskStreamsRef.current = {};
+    syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, Array.from(conversationIds));
   };
 }
 
@@ -160,12 +186,14 @@ export function createStartTaskEventStreamAction({
       )
     );
     if (existingStreamEntry) {
-      const [existingLocalMessageId] = existingStreamEntry;
+      const [existingLocalMessageId, existingState] = existingStreamEntry;
       taskStreamsRef.current[existingLocalMessageId]?.abort();
       delete taskStreamsRef.current[existingLocalMessageId];
       delete activeTaskStreamsRef.current[existingLocalMessageId];
+      syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [existingState.convId]);
     }
     activeTaskStreamsRef.current[localMessageId] = { convId, serverMessageId, generationTaskId, lastSequence: after || 0, content: initialContent || "" };
+    syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [convId]);
     setIsLoading(true);
 
     const sequenceKey = `${generationTaskId || serverMessageId || localMessageId}`;
@@ -211,10 +239,14 @@ export function createStartTaskEventStreamAction({
       callbacks: {
         getActiveState: () => activeTaskStreamsRef.current[localMessageId],
         setActiveState: (state: TaskStreamActiveState) => {
-          activeTaskStreamsRef.current[localMessageId] = state;
+          const nextState = { ...activeTaskStreamsRef.current[localMessageId], ...state };
+          activeTaskStreamsRef.current[localMessageId] = nextState;
+          syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [nextState.convId]);
         },
         deleteActiveState: () => {
+          const previousConvId = activeTaskStreamsRef.current[localMessageId]?.convId;
           delete activeTaskStreamsRef.current[localMessageId];
+          syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [previousConvId]);
         },
         streamAppend: realtimeAppend,
         streamGet: () => realtimeGet(localMessageId)?.content || "",
@@ -252,10 +284,16 @@ export function createStartTaskEventStreamAction({
       } finally {
         if (controller.signal.aborted) {
           delete taskStreamsRef.current[localMessageId];
+          const previousConvId = activeTaskStreamsRef.current[localMessageId]?.convId;
+          delete activeTaskStreamsRef.current[localMessageId];
+          syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [previousConvId]);
           return;
         }
         if (!streamOwnerRegistry.canFinalize(streamOwner)) {
           delete taskStreamsRef.current[localMessageId];
+          const previousConvId = activeTaskStreamsRef.current[localMessageId]?.convId;
+          delete activeTaskStreamsRef.current[localMessageId];
+          syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [previousConvId]);
           return;
         }
         const accumulated = taskEventHandler.getAccumulated();
@@ -301,6 +339,9 @@ export function createStartTaskEventStreamAction({
         }
         streamOwnerRegistry.finalize(streamOwner);
         delete taskStreamsRef.current[localMessageId];
+        const previousConvId = activeTaskStreamsRef.current[localMessageId]?.convId;
+        delete activeTaskStreamsRef.current[localMessageId];
+        syncActiveTaskStreamsToRuntime(activeTaskStreamsRef.current, [previousConvId]);
         if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);
         }

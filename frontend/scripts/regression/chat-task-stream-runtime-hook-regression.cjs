@@ -19,7 +19,8 @@ source = source.replace(/import type[^;]+streaming[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
 source = source.replace(/import \{ getConversationSnapshot, patchConversationSnapshot \} from "@\/lib\/chatConversationCache";\n/g, "const getConversationSnapshot = () => undefined; const patchConversationSnapshot = () => {};\n");
 source = source.replace(/import \{ readAuthState \} from "@\/lib\/auth\/state";\n/g, "const readAuthState = () => ({ token: null });\n");
-source = source.replace(/import \{ chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry \} from "@\/lib\/chatRuntime";\n/g, "const defaultChatStreamOwnerRegistry = { register(){}, canFinalize(){ return true; }, finalize(){ return true; }, abortConversation(){} };\n");
+const runtimeStoreCalls = [];
+source = source.replace(/import \{ chatRuntimeStore, chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry \} from "@\/lib\/chatRuntime";\n/g, "const chatRuntimeStore = { patchConversation: (...args) => globalThis.__runtimeStoreCalls.push(args) }; const defaultChatStreamOwnerRegistry = { register(){}, canFinalize(){ return true; }, finalize(){ return true; }, abortConversation(){} };\n");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
 source = source.replace(/import \{ realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeMarkCompleted as defaultRealtimeMarkCompleted \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeAppend = () => {}; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeMarkCompleted = () => {};\n");
@@ -43,6 +44,7 @@ const compiled = ts.transpileModule(source, {
   fileName: sourceFile,
 });
 fs.writeFileSync(outFile, compiled.outputText);
+globalThis.__runtimeStoreCalls = runtimeStoreCalls;
 
 const {
   createStopAllTaskStreamsAction,
@@ -71,8 +73,15 @@ function makeController() {
     },
   };
 }
+function resetRuntimeStoreCalls() {
+  runtimeStoreCalls.length = 0;
+}
+function patchesForConversation(conversationId) {
+  return runtimeStoreCalls.filter((entry) => entry[0] === conversationId).map((entry) => entry[1]);
+}
 
 test("createStopAllTaskStreamsAction aborts controllers, clears refs and aborts stream owners", () => {
+  resetRuntimeStoreCalls();
   const c1 = makeController();
   const c2 = makeController();
   const ownerAborts = [];
@@ -89,6 +98,8 @@ test("createStopAllTaskStreamsAction aborts controllers, clears refs and aborts 
   assert.deepEqual(taskStreamsRef.current, {});
   assert.deepEqual(activeTaskStreamsRef.current, {});
   assert.deepEqual(ownerAborts, [[9, "stop"], [10, "stop"]]);
+  assert.deepEqual(patchesForConversation(9).at(-1).activeStreams, {});
+  assert.deepEqual(patchesForConversation(10).at(-1).activeStreams, {});
 });
 
 test("createStartTaskEventStreamAction guards missing ids and duplicate streams", () => {
@@ -113,6 +124,7 @@ test("createStartTaskEventStreamAction guards missing ids and duplicate streams"
 });
 
 test("start action stores active state, headers and forwards events", async () => {
+  resetRuntimeStoreCalls();
   const taskStreamsRef = { current: {} };
   const activeTaskStreamsRef = { current: {} };
   const loading = createState(false);
@@ -153,7 +165,10 @@ test("start action stores active state, headers and forwards events", async () =
   await Promise.resolve();
   assert.equal(loading.get(), true);
   assert.equal(taskStreamsRef.current.local, undefined);
-  assert.deepEqual(activeTaskStreamsRef.current.local, { content: "seed+" });
+  assert.equal(activeTaskStreamsRef.current.local, undefined);
+  const runtimePatches = patchesForConversation(9);
+  assert.equal(runtimePatches[0].activeStreams.local.generationTaskId, 22);
+  assert.equal(runtimePatches.some((patch) => Object.keys(patch.activeStreams).length === 0), true);
   assert.equal(runOptions.apiBaseUrl, "/api");
   assert.equal(runOptions.headers.Authorization, "Bearer tok");
   assert.deepEqual(events, ["event-1"]);
