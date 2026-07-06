@@ -740,6 +740,37 @@ async function testCachedStreamingAndServerAssistantDedupesByServerId() {
   assert.equal(restoredAssistants[0].serverMessageId, 42);
 }
 
+async function testRestoreSyncsRuntimeTaskMetadata() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  resetRuntimeStoreCalls();
+  restoreImpl = async () => ({
+    title: "Runtime metadata",
+    model: "m1",
+    messages: [{ id: "a", role: "assistant", content: "", serverMessageId: 55, generationTaskId: 77 }],
+  });
+  statusImpl = async () => undefined;
+  countImpl = async () => undefined;
+  runRuntime({
+    conversationId: 9,
+    token: "tok",
+    active: {
+      localA: { convId: 9, serverMessageId: 55, generationTaskId: 77, lastSequence: 3, content: "partial" },
+      otherConv: { convId: 10, serverMessageId: 66, generationTaskId: 88, lastSequence: 1, content: "other" },
+    },
+    pendingLocalAssistants: {
+      pendingA: { convId: 9, message: { id: "pendingA", role: "assistant", content: "", generationTaskId: 77 } },
+      pendingOther: { convId: 10, message: { id: "pendingOther", role: "assistant", content: "", generationTaskId: 88 } },
+    },
+  });
+  await flush(); await flush();
+  const runtimePatch = lastRuntimePatchFor(9)?.[2];
+  assert.equal(runtimePatch.activeStreams.localA.generationTaskId, 77);
+  assert.equal(runtimePatch.activeStreams.otherConv, undefined);
+  assert.equal(runtimePatch.generationTasks["77"].localMessageId, "localA");
+  assert.deepEqual(runtimePatch.pendingOptimisticMessages.map((message) => message.id), ["pendingA"]);
+}
+
 async function testNavigationAbortsControllers() {
   const { refs, mainController, compareController } = runRuntime({ conversationId: 9, token: null, hasMain: true, hasCompare: true });
   assert.equal(mainController.aborted, true);
@@ -769,6 +800,7 @@ async function testNavigationAbortsControllers() {
   await testTerminalFailedStatusClearsPendingAndLoading();
   await testTerminalBackendMessageBeatsActiveTaskStream();
   await testCachedStreamingAndServerAssistantDedupesByServerId();
+  await testRestoreSyncsRuntimeTaskMetadata();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");
 })();

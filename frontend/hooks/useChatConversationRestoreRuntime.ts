@@ -218,9 +218,29 @@ function mergeFreshLocalMessagesIntoRestore(previous: Message[], restored: Messa
   return sortMessagesByCreatedAtWhenAvailable([...restoredWithoutFresh, ...freshLocalMessages]);
 }
 
-function syncRestoreSnapshotToRuntime(snapshot: CachedConversationSnapshot) {
+function syncRestoreSnapshotToRuntime(
+  snapshot: CachedConversationSnapshot,
+  options: {
+    activeEntries?: Array<[string, TaskStreamActiveState]>;
+    pendingLocalAssistants?: Record<string, { convId?: number; message: Message }>;
+  } = {}
+) {
+  const activeEntries = (options.activeEntries || []).filter(([, state]) => state.convId === snapshot.conversationId);
+  const activeStreams = Object.fromEntries(activeEntries.map(([localMessageId, state]) => [localMessageId, { ...state }]));
+  const generationTasks = Object.fromEntries(
+    activeEntries
+      .filter(([, state]) => state.generationTaskId)
+      .map(([localMessageId, state]) => [String(state.generationTaskId), { ...state, localMessageId }])
+  );
+  const pendingOptimisticMessages = Object.values(options.pendingLocalAssistants || {})
+    .filter((entry) => entry.convId === snapshot.conversationId)
+    .map((entry) => entry.message);
+
   chatRuntimeStore.patchConversation(snapshot.conversationId, {
     messages: snapshot.messages,
+    generationTasks,
+    activeStreams,
+    pendingOptimisticMessages,
     compareModels: snapshot.compareModels,
     updatedAt: snapshot.updatedAt || snapshot.fetchedAt || Date.now(),
   });
@@ -469,7 +489,10 @@ export function useChatConversationRestoreRuntime({
         setEffectiveSkillKey,
         setIsLoadingHistory,
       });
-      syncRestoreSnapshotToRuntime(cachedSnapshot);
+      syncRestoreSnapshotToRuntime(cachedSnapshot, {
+        activeEntries,
+        pendingLocalAssistants: pendingLocalAssistantsRef?.current,
+      });
     } else {
       emitConversationSwitchPerformanceEvent("cache-miss", {
         conversationId: loadConversationId,
@@ -528,7 +551,10 @@ export function useChatConversationRestoreRuntime({
             setEffectiveSkillKey,
             setIsLoadingHistory,
           });
-          syncRestoreSnapshotToRuntime(persistentSnapshot);
+          syncRestoreSnapshotToRuntime(persistentSnapshot, {
+            activeEntries,
+            pendingLocalAssistants: pendingLocalAssistantsRef?.current,
+          });
         })
         .catch(() => {});
     }
@@ -759,7 +785,10 @@ export function useChatConversationRestoreRuntime({
           };
           setConversationSnapshot(snapshot);
           setPersistentConversationSnapshot(snapshot);
-          syncRestoreSnapshotToRuntime(snapshot);
+          syncRestoreSnapshotToRuntime(snapshot, {
+            activeEntries,
+            pendingLocalAssistants: pendingLocalAssistantsRef?.current,
+          });
           emitConversationSwitchPerformanceEvent("restore-reconciled", {
             conversationId: loadConversationId,
             loadSeq,
