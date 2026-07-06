@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
-const { env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 function passwordFromCodes() {
   const codes = env('TESTNET_PASSWORD_CODES');
@@ -118,19 +118,21 @@ async function createAndRun({ baseUrl, token, model, prompt }) {
   return { conversation, init, taskId, stream, assistant, sources, sourceCount };
 }
 
-async function inspectActivityPanel({ baseUrl, auth, conversationId }) {
-  const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+async function inspectActivityPanel({ frontendBaseUrl, auth, conversationId }) {
+  const { browser, page } = await openAuthedPage({
+    baseUrl: frontendBaseUrl,
+    token: auth.token,
+    user: auth.user,
+    sessionToken: auth.sessionToken,
+    refreshToken: auth.refreshToken,
+    viewport: { width: 1440, height: 1000 },
+  });
   const consoleEvents = [];
   const pageErrors = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-  }, { token: auth.token, user: auth.user });
   try {
-    await page.goto(`${baseUrl}/chat/?id=${conversationId}&source_smoke=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(`${frontendBaseUrl}/chat/?id=${conversationId}&source_smoke=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.locator('[data-chat-message-row="true"][data-message-role="assistant"]').last().waitFor({ state: 'visible', timeout: 30000 });
     const entry = page.locator('button').filter({ hasText: /来源|查看来源|已思考|思考中/ }).last();
@@ -160,9 +162,11 @@ async function inspectActivityPanel({ baseUrl, auth, conversationId }) {
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
+  const apiBaseUrl = env('SEARCH_SOURCE_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('SEARCH_SOURCE_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const email = env('TESTNET_EMAIL');
   const password = env('TESTNET_PASSWORD') || passwordFromCodes();
-  const auth = await login({ baseUrl, email, password });
+  const auth = await login({ baseUrl: apiBaseUrl, email, password });
   const models = (env('SEARCH_SOURCE_MODELS', 'gpt-5.4-mini,gemini-3.5-flash,deepseek-v4-flash,kimi-k2.5'))
     .split(',')
     .map((item) => item.trim())
@@ -170,20 +174,28 @@ async function inspectActivityPanel({ baseUrl, auth, conversationId }) {
   const prompt = env('SEARCH_SOURCE_PROMPT', '请联网搜索并用中文简短回答：OpenAI、Google Gemini、DeepSeek、Kimi 最近一次公开产品更新分别是什么？回答只要三到五点，并确保基于搜索来源。');
 
   const results = [];
-  for (const model of models) {
-    const run = await createAndRun({ baseUrl, token: auth.token, model, prompt });
-    const activity = await inspectActivityPanel({ baseUrl, auth, conversationId: run.conversation.id });
-    results.push({
-      model,
-      conversationId: run.conversation.id,
-      taskId: run.taskId,
-      stream: run.stream,
-      sourceCount: run.sourceCount,
-      sources: run.sources.slice(0, 5).map((source) => ({ title: source.title, url: source.url })),
-      assistantStatus: run.assistant?.generation_status || run.assistant?.server_generation_status || '',
-      contentLength: run.assistant?.content?.length || 0,
-      activity,
-    });
+  const conversationIds = [];
+  try {
+    for (const model of models) {
+      const run = await createAndRun({ baseUrl: apiBaseUrl, token: auth.token, model, prompt });
+      conversationIds.push(run.conversation.id);
+      const activity = await inspectActivityPanel({ frontendBaseUrl, auth, conversationId: run.conversation.id });
+      results.push({
+        model,
+        conversationId: run.conversation.id,
+        taskId: run.taskId,
+        stream: run.stream,
+        sourceCount: run.sourceCount,
+        sources: run.sources.slice(0, 5).map((source) => ({ title: source.title, url: source.url })),
+        assistantStatus: run.assistant?.generation_status || run.assistant?.server_generation_status || '',
+        contentLength: run.assistant?.content?.length || 0,
+        activity,
+      });
+    }
+  } finally {
+    if (env('KEEP_LIVE_CONVERSATIONS') !== '1') {
+      await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds }).catch(() => {});
+    }
   }
 
   const result = {
@@ -198,6 +210,8 @@ async function inspectActivityPanel({ baseUrl, auth, conversationId }) {
       && item.activity.consoleErrors.length === 0
       && item.activity.pageErrors.length === 0
     ),
+    apiBaseUrl,
+    frontendBaseUrl,
     models,
     results,
   };
