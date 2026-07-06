@@ -21,7 +21,7 @@ import {
 } from "@/lib/chatMessageStatePatch";
 import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { ChatModel, Message } from "@/lib/chatTypes";
-import { chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
+import { chatRuntimeStore, chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
 import type { ChatStreamOwner } from "@/lib/chatStreamOwnerRegistry";
 
 type AbortReason = "user" | "navigation" | null;
@@ -41,6 +41,43 @@ type StartBackgroundPolling = (
   serverMessageId?: number
 ) => void;
 type MainStreamHandler = ReturnType<typeof defaultCreateMainStreamEventHandler>;
+
+function syncMainStreamToRuntime({
+  conversationId,
+  assistantId,
+  serverMessageId,
+  generationTaskId,
+  messages,
+  active,
+}: {
+  conversationId: number | undefined;
+  assistantId: string;
+  serverMessageId?: number;
+  generationTaskId?: number;
+  messages?: Message[];
+  active: boolean;
+}) {
+  if (!conversationId) return;
+  const current = chatRuntimeStore.getConversation(conversationId);
+  const activeStreams = { ...current.activeStreams };
+  if (active) {
+    activeStreams[assistantId] = { convId: conversationId, serverMessageId, generationTaskId, main: true };
+  } else {
+    delete activeStreams[assistantId];
+  }
+  const generationTasks = { ...current.generationTasks };
+  if (generationTaskId && active) {
+    generationTasks[String(generationTaskId)] = { convId: conversationId, serverMessageId, generationTaskId, localMessageId: assistantId };
+  } else if (generationTaskId) {
+    delete generationTasks[String(generationTaskId)];
+  }
+  chatRuntimeStore.patchConversation(conversationId, {
+    ...(messages ? { messages } : {}),
+    activeStreams,
+    generationTasks,
+    updatedAt: Date.now(),
+  });
+}
 
 type CreateMainStreamResponseDeps = {
   selectedModelName: string;
@@ -119,8 +156,9 @@ export function createStreamResponseAction({
       });
     };
 
+    const resolvedConversationId = convId || getCurrentConversation();
     const streamOwner: ChatStreamOwner = {
-      conversationId: convId || getCurrentConversation() || 0,
+      conversationId: resolvedConversationId || 0,
       serverMessageId: assistantMsg.serverMessageId,
       streamId: assistantMsg.id,
       groupId: assistantMsg.groupId,
@@ -129,6 +167,13 @@ export function createStreamResponseAction({
       column: assistantMsg.groupIndex === 1 ? "right" : assistantMsg.groupIndex === 0 ? "left" : undefined,
     };
     streamOwnerRegistry.register(streamOwner);
+    syncMainStreamToRuntime({
+      conversationId: resolvedConversationId,
+      assistantId: assistantMsg.id,
+      serverMessageId: assistantMsg.serverMessageId,
+      generationTaskId: assistantMsg.generationTaskId,
+      active: true,
+    });
 
     try {
       const lifecycleResult = await runChatStreamLifecycle({
@@ -170,13 +215,18 @@ export function createStreamResponseAction({
       });
 
       if (finalAction.shouldSyncFinalData) {
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
-          applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData })
-        ));
+        setMessages((prev) => {
+          const next = patchMessageById(prev, assistantMsg.id, (m) =>
+            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData })
+          );
+          syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: state.serverMessageId, generationTaskId: state.generationTaskId, messages: next, active: true });
+          return next;
+        });
       }
 
       if (finalAction.type === "recover") {
         mainStreamHandler.setRecoverable(true);
+        syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: finalAction.serverMessageId, generationTaskId: finalAction.generationTaskId, active: false });
         startTaskEventStream(
           convId || getCurrentConversation(),
           assistantMsg.id,
@@ -196,9 +246,15 @@ export function createStreamResponseAction({
         realtimeMarkCompleted(assistantMsg.id, now());
         const completedRealtimeData = realtimeGet(assistantMsg.id);
         if (completedRealtimeData?.statusTimeline?.length) {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
-            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData: completedRealtimeData })
-          ));
+          setMessages((prev) => {
+            const next = patchMessageById(prev, assistantMsg.id, (m) =>
+              applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData: completedRealtimeData })
+            );
+            syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: finalAction.serverMessageId, generationTaskId: state.generationTaskId, messages: next, active: false });
+            return next;
+          });
+        } else {
+          syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: finalAction.serverMessageId, generationTaskId: state.generationTaskId, active: false });
         }
         if (finalAction.shouldStartBackgroundPolling && finalAction.serverMessageId) {
           startBackgroundPolling(convId || getCurrentConversation(), assistantMsg.id, finalAction.serverMessageId);
@@ -210,14 +266,24 @@ export function createStreamResponseAction({
         realtimeMarkCompleted(assistantMsg.id, now());
         const completedRealtimeData = realtimeGet(assistantMsg.id);
         if (completedRealtimeData?.statusTimeline?.length) {
-          setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) =>
-            applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData: completedRealtimeData })
-          ));
+          setMessages((prev) => {
+            const next = patchMessageById(prev, assistantMsg.id, (m) =>
+              applyFinalRealtimeDataToMessage(m, { finalContent: finalAction.finalContent, finalData: completedRealtimeData })
+            );
+            syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: state.serverMessageId, generationTaskId: state.generationTaskId, messages: next, active: false });
+            return next;
+          });
+        } else {
+          syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: state.serverMessageId, generationTaskId: state.generationTaskId, active: false });
         }
       }
 
       if (finalAction.shouldMarkCompleted) {
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildCompletedPatch(now())));
+        setMessages((prev) => {
+          const next = patchMessageById(prev, assistantMsg.id, buildCompletedPatch(now()));
+          syncMainStreamToRuntime({ conversationId: resolvedConversationId, assistantId: assistantMsg.id, serverMessageId: state.serverMessageId, generationTaskId: state.generationTaskId, messages: next, active: false });
+          return next;
+        });
       }
     }
 

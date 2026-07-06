@@ -20,6 +20,19 @@ const transformed = ts.transpileModule(source, {
   },
 }).outputText;
 
+const runtimeStoreCalls = [];
+const runtimeStoreState = new Map();
+const chatRuntimeStoreMock = {
+  getConversation(id) {
+    return runtimeStoreState.get(id) || { activeStreams: {}, generationTasks: {}, messages: [] };
+  },
+  patchConversation(id, patch) {
+    const existing = this.getConversation(id);
+    const next = { ...existing, ...patch, activeStreams: patch.activeStreams || existing.activeStreams, generationTasks: patch.generationTasks || existing.generationTasks };
+    runtimeStoreState.set(id, next);
+    runtimeStoreCalls.push([id, patch]);
+  },
+};
 const moduleCache = new Map();
 function loadModule(file) {
   if (moduleCache.has(file)) return moduleCache.get(file).exports;
@@ -37,7 +50,10 @@ function loadModule(file) {
         realtimeMarkCompleted: () => {},
       };
     }
-    if (specifier === "@/lib/chatRuntime") return { chatStreamOwnerRegistry: { register(){}, canFinalize(){ return true; }, finalize(){ return true; }, abortConversation(){} } };
+    if (specifier === "@/lib/chatRuntime") return {
+      chatRuntimeStore: chatRuntimeStoreMock,
+      chatStreamOwnerRegistry: { register(){}, canFinalize(){ return true; }, finalize(){ return true; }, abortConversation(){} },
+    };
     if (specifier === "@/lib/chatMainStreamEventHandler") return { createMainStreamEventHandler: () => { throw new Error("default handler should be injected"); } };
     if (specifier === "@/lib/chatStreamLifecycle") return { runChatStreamLifecycle: () => { throw new Error("default lifecycle should be injected"); } };
     if (specifier === "@/lib/chatFinalReconciliationCoordinator") {
@@ -97,6 +113,13 @@ function makeAssistant(overrides = {}) {
     ...overrides,
   };
 }
+function resetRuntimeStore() {
+  runtimeStoreCalls.length = 0;
+  runtimeStoreState.clear();
+}
+function patchesForConversation(conversationId) {
+  return runtimeStoreCalls.filter((entry) => entry[0] === conversationId).map((entry) => entry[1]);
+}
 function makeHandler(stateOverrides = {}) {
   const calls = [];
   const state = {
@@ -120,6 +143,7 @@ function makeHandler(stateOverrides = {}) {
   };
 }
 async function runAction({ handlerState = {}, lifecycleResult = { action: "completed" }, streamContent = "streamed", realtimeData, currentConversation = 99, convId, abortReason = null, now = () => 1234, streamOwnerRegistry } = {}) {
+  resetRuntimeStore();
   const handlerFixture = makeHandler(handlerState);
   const calls = [];
   const resolvedRealtimeData = realtimeData === undefined ? { content: streamContent } : realtimeData;
@@ -161,6 +185,10 @@ async function testCompletedSyncClearAndMark() {
   assert.ok(calls.some((call) => call[0] === "setMessages"));
   assert.deepEqual(messages[0].finalData, { content: "streamed", serverMessageId: 11 });
   assert.equal(messages[0].completedAt, 1234);
+  const runtimePatches = patchesForConversation(99);
+  assert.equal(runtimePatches[0].activeStreams["assistant-1"].main, true);
+  assert.equal(runtimePatches.at(-1).messages[0].completedAt, 1234);
+  assert.equal(runtimePatches.at(-1).activeStreams["assistant-1"], undefined);
   assert.ok(calls.some((call) => call[0] === "realtimeMarkCompleted" && call[1] === "assistant-1" && call[2] === 1234));
   assert.deepEqual(handlerCalls[0], ["event", "event-1"]);
   assert.ok(handlerCalls.some((call) => call[0] === "close"));
@@ -191,6 +219,7 @@ async function testRecoverFinalActionStartsTaskAndPollingWithExplicitConversatio
   assert.equal(state.recoverable, true);
   assert.ok(calls.some((call) => call[0] === "task" && call[1] === 55 && call[3] === 111 && call[4] === 7 && call[5] === "partial" && call[6] === 222));
   assert.ok(calls.some((call) => call[0] === "poll" && call[1] === 55 && call[2] === "assistant-1" && call[3] === 111));
+  assert.equal(patchesForConversation(55).at(-1).activeStreams["assistant-1"], undefined);
 }
 
 async function testReconcileAfterDoneStartsOnlyPolling() {
