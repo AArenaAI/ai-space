@@ -26,6 +26,7 @@ import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStre
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { CreateConversationAction } from "@/hooks/useChatConversationCreateRuntime";
 import { readAuthState } from "@/lib/auth/state";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 type AbortReason = "user" | "navigation" | null;
 type SendReasoning = { enabled: boolean; effort?: string };
@@ -38,6 +39,22 @@ type StreamResponse = (
   onGroupContext?: (context: ChatStreamGroupContext) => void
 ) => Promise<ChatStreamRunResult | undefined>;
 export type SingleSendAcceptResult = { accepted: boolean; notice?: string; completion?: Promise<void> };
+
+function syncSingleSendMessagesToRuntime(conversationId: number | undefined, messages: Message[], pendingOptimisticMessages: Message[] = []) {
+  if (!conversationId) return;
+  chatRuntimeStore.patchConversation(conversationId, {
+    messages,
+    pendingOptimisticMessages,
+    updatedAt: Date.now(),
+  });
+}
+
+function buildPendingLocalAssistantMessages(pendingLocalAssistantsRef: MutableRefObject<Record<string, { convId?: number; message: Message }>> | undefined, conversationId: number | undefined) {
+  if (!pendingLocalAssistantsRef || !conversationId) return [];
+  return Object.values(pendingLocalAssistantsRef.current)
+    .filter((entry) => entry.convId === conversationId)
+    .map((entry) => entry.message);
+}
 
 export type UseChatSingleSendRuntimeOptions = {
   apiBaseUrl: string;
@@ -162,7 +179,13 @@ export function useChatSingleSendRuntime({
 
       const contextMessages = messagePlan.contextMessages;
       const localAssistantMsg = messagePlan.assistantMessage;
-      setMessages((prev) => applyServerFirstPreInitMessages(prev, messagePlan));
+      let lastRuntimeMessages: Message[] = [];
+      setMessages((prev) => {
+        const next = applyServerFirstPreInitMessages(prev, messagePlan);
+        lastRuntimeMessages = next;
+        syncSingleSendMessagesToRuntime(convId, next);
+        return next;
+      });
       if (convId && !notebookId) {
         dispatchWindowEvent(new CustomEvent("conversation-updated", {
           detail: buildConversationUpdatedEventDetail(convId, new Date(now()).toISOString(), {
@@ -230,11 +253,15 @@ export function useChatSingleSendRuntime({
               (serverAssistant.generationTaskId && message.generationTaskId === serverAssistant.generationTaskId)
             ))
           );
-          return [...withoutDuplicateAssistant, serverAssistant];
+          const next = [...withoutDuplicateAssistant, serverAssistant];
+          lastRuntimeMessages = next;
+          syncSingleSendMessagesToRuntime(convId, next, [serverAssistant]);
+          return next;
         });
         hasInsertedServerAssistant = true;
         if (pendingLocalAssistantsRef && convId) {
           pendingLocalAssistantsRef.current[serverAssistant.id] = { convId, message: serverAssistant };
+          syncSingleSendMessagesToRuntime(convId, lastRuntimeMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
         }
         const streamRes = await fetch(`${apiBaseUrl}/api/tasks/${initResult.task_id}/stream?after=0`, {
           headers,
@@ -257,11 +284,13 @@ export function useChatSingleSendRuntime({
         });
         if (decision.type !== "none") {
           setMessages((prev) => {
-            if (prev.some((message) => message?.id === activeAssistantId)) {
-              return patchMessageById(prev, activeAssistantId, decision.patch);
-            }
-            if (hasInsertedServerAssistant) return prev;
-            return [...prev, { ...localAssistantMsg, ...decision.patch } as Message];
+            const next = prev.some((message) => message?.id === activeAssistantId)
+              ? patchMessageById(prev, activeAssistantId, decision.patch)
+              : hasInsertedServerAssistant
+                ? prev
+                : [...prev, { ...localAssistantMsg, ...decision.patch } as Message];
+            syncSingleSendMessagesToRuntime(convId, next, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
+            return next;
           });
         }
       } finally {
@@ -269,6 +298,9 @@ export function useChatSingleSendRuntime({
         const finalAbortReason = abortReasonRef.current;
         if (pendingLocalAssistantsRef && finalAbortReason !== "navigation") {
           delete pendingLocalAssistantsRef.current[activeAssistantId];
+          if (convId) {
+            syncSingleSendMessagesToRuntime(convId, lastRuntimeMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
+          }
         }
         const decision = decideSingleSendFinally({
           abortReason: finalAbortReason,

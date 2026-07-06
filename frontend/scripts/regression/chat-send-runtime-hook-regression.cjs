@@ -50,8 +50,14 @@ let realtimeGetImpl = () => undefined;
 let uuidCounter = 0;
 const events = [];
 const chatRuntimeStoreCalls = [];
+const chatRuntimeStoreState = new Map();
 const chatRuntimeStoreMock = {
-  patchConversation: (...args) => chatRuntimeStoreCalls.push(["patchConversation", ...args]),
+  getConversation: (conversationId) => chatRuntimeStoreState.get(conversationId) || { messages: [], pendingOptimisticMessages: [], activeStreams: {}, generationTasks: {}, compareModels: [] },
+  patchConversation: (conversationId, patch) => {
+    const existing = chatRuntimeStoreMock.getConversation(conversationId);
+    chatRuntimeStoreState.set(conversationId, { ...existing, ...patch });
+    chatRuntimeStoreCalls.push(["patchConversation", conversationId, patch]);
+  },
   deleteConversation: (...args) => chatRuntimeStoreCalls.push(["deleteConversation", ...args]),
   setActiveConversation: (...args) => chatRuntimeStoreCalls.push(["setActiveConversation", ...args]),
 };
@@ -167,6 +173,13 @@ function loadModule(file) {
 }
 const { useChatSendRuntime } = loadModule(tmpFile);
 
+function resetRuntimeStore() {
+  chatRuntimeStoreCalls.length = 0;
+  chatRuntimeStoreState.clear();
+}
+function runtimePatches(conversationId) {
+  return chatRuntimeStoreCalls.filter((call) => call[0] === "patchConversation" && call[1] === conversationId).map((call) => call[2]);
+}
 function stateHarness(initial = []) {
   let messages = initial;
   let isLoading = false;
@@ -192,6 +205,7 @@ function makeRuntime(overrides = {}) {
     compareAbortControllersRef: { current: [] },
     abortReasonRef: { current: null },
     taskStreamsRef: { current: {} },
+    pendingLocalAssistantsRef: { current: {} },
     backgroundPollersRef: { current: {} },
     lastReasoningRef: { current: { enabled: false, effort: "high" } },
     lastSearchRef: { current: false },
@@ -226,6 +240,7 @@ function makeRuntime(overrides = {}) {
 
 async function testSingleSendCreatesConversationAndRunsRequest() {
   events.length = 0;
+  resetRuntimeStore();
   let request;
   singleInitImpl = async (opts) => { request = opts; return {
     conversation_id: 42,
@@ -250,6 +265,10 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
   assert.deepEqual(request.messageFileIds, ["f1"]);
   assert.equal(refs.abortControllerRef.current, null);
   assert.equal(refs.abortReasonRef.current, null);
+  const patches = runtimePatches(42);
+  assert.ok(patches.some((patch) => patch.messages?.some((message) => message.role === "user" && message.content === "hello world")));
+  assert.ok(patches.some((patch) => patch.pendingOptimisticMessages?.some((message) => message.id === "502")));
+  assert.deepEqual(patches.at(-1).pendingOptimisticMessages, []);
   assert.ok(events.some((e) => e[0] === "event" && e[1] === "conversation-updated"));
 }
 
@@ -275,6 +294,7 @@ async function testSingleSendRequestErrorPatchesAssistant() {
 }
 
 async function testCompareSendStartsCompareAndRunCoordinator() {
+  resetRuntimeStore();
   let compareOpts;
   let initOpts;
   compareInitImpl = async (opts) => {
@@ -313,6 +333,10 @@ async function testCompareSendStartsCompareAndRunCoordinator() {
   assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.serverMessageId), [600, 601]);
   assert.deepEqual(state.messages.filter((message) => message.role === "assistant").map((message) => message.generationTaskId), [700, 701]);
   assert.equal(refs.compareAbortControllersRef.current.length, 0);
+  const patches = runtimePatches(10);
+  assert.ok(patches.some((patch) => patch.messages?.some((message) => message.role === "user" && message.content === "compare")));
+  assert.ok(patches.some((patch) => patch.messages?.filter((message) => message.role === "assistant").length === 2));
+  assert.deepEqual(patches.at(-1).compareModels, ["m1", "m2"]);
   assert.deepEqual(startPolls[0], [10, compareOpts.assistantMessages[0].id, 202]);
 }
 

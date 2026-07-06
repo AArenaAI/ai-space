@@ -34,6 +34,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { CreateConversationAction } from "@/hooks/useChatConversationCreateRuntime";
 import { readAuthState } from "@/lib/auth/state";
 import { apiFetch } from "@/lib/api/client";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 type AbortReason = "user" | "navigation" | null;
 type SendReasoning = { enabled: boolean; effort?: string };
@@ -50,6 +51,16 @@ type StartBackgroundPolling = (
   localMessageId: string,
   serverMessageId?: number
 ) => void;
+
+function syncCompareMessagesToRuntime(conversationId: number | undefined, messages: Message[], compareModels?: string[]) {
+  if (!conversationId) return;
+  chatRuntimeStore.patchConversation(conversationId, {
+    messages,
+    ...(compareModels ? { compareModels } : {}),
+    updatedAt: Date.now(),
+  });
+}
+
 export async function persistCompareConversationState({
   apiBaseUrl,
   conversationId,
@@ -160,7 +171,11 @@ export function useChatCompareSendRuntime({
         activityStatus: createBusyGeneratingStatus(translate),
         generationStartedAt: now(),
       } as Message;
-      setMessages((prev) => [...prev, preparedAssistant]);
+      setMessages((prev) => {
+        const next = [...prev, preparedAssistant];
+        syncCompareMessagesToRuntime(convId, next, compareModelIds);
+        return next;
+      });
       setIsLoading(true);
       setIsCompare(true);
       setCompareModels(compareModelIds);
@@ -185,18 +200,21 @@ export function useChatCompareSendRuntime({
             (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
             (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
           );
-          if (existingIndex === -1) return [...prev, serverBoundAssistant];
-          return patchMessageById(prev, prev[existingIndex].id, (m) => ({
-            ...m,
-            ...serverBoundAssistant,
-            ...buildRecoverableResultPatch({
-              serverMessageId: streamResult.serverMessageId,
-              generationTaskId: streamResult.generationTaskId,
-              existingServerMessageId: m.serverMessageId,
-              existingGenerationTaskId: m.generationTaskId,
-              busyActivityStatus: createBusyGeneratingStatus(translate),
-            }),
-          }));
+          const next = existingIndex === -1
+            ? [...prev, serverBoundAssistant]
+            : patchMessageById(prev, prev[existingIndex].id, (m) => ({
+              ...m,
+              ...serverBoundAssistant,
+              ...buildRecoverableResultPatch({
+                serverMessageId: streamResult.serverMessageId,
+                generationTaskId: streamResult.generationTaskId,
+                existingServerMessageId: m.serverMessageId,
+                existingGenerationTaskId: m.generationTaskId,
+                busyActivityStatus: createBusyGeneratingStatus(translate),
+              }),
+            }));
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
         });
       };
       const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: ChatStreamRunResult) => {
@@ -214,7 +232,11 @@ export function useChatCompareSendRuntime({
           busyActivityStatus: createBusyGeneratingStatus(translate),
           now: now(),
         });
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
+        setMessages((prev) => {
+          const next = patchMessageById(prev, assistantMsg.id, decision.patch);
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
+        });
         if (decision.type === "recoverable_busy" && decision.shouldStartBackgroundPolling && decision.serverMessageId) {
           startBackgroundPolling(convId, assistantMsg.id, decision.serverMessageId);
         }
@@ -239,7 +261,11 @@ export function useChatCompareSendRuntime({
             streamResponse,
             onGroupContextResolved: () => {},
             onRecoverableResult: handleCompareRecoverableResult,
-            onAbortUser: (assistantMsg) => setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(now()))),
+            onAbortUser: (assistantMsg) => setMessages((prev) => {
+              const next = patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(now()));
+              syncCompareMessagesToRuntime(convId, next, compareModelIds);
+              return next;
+            }),
             onRunError: handleCompareRunError,
             getAbortReason: () => abortReasonRef.current,
           },
@@ -343,7 +369,11 @@ export function useChatCompareSendRuntime({
 
       setIsCompare(true);
       setCompareModels(compareModelIds);
-      setMessages((prev) => [...prev, userMsg]);
+      setMessages((prev) => {
+        const next = [...prev, userMsg];
+        syncCompareMessagesToRuntime(convId, next, compareModelIds);
+        return next;
+      });
       setIsLoading(true);
 
       const controllers = assistantMsgs.map(() => new AbortController());
@@ -354,11 +384,15 @@ export function useChatCompareSendRuntime({
       const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
 
       const handleCompareGroupContextResolved = (context: ChatStreamGroupContext) => {
-        setMessages((prev) => applyCompareGroupContextToMessages(prev, {
-          userMessageId: userMsg.id,
-          assistantIds: assistantMsgs.map((assistant) => assistant.id),
-          context,
-        }));
+        setMessages((prev) => {
+          const next = applyCompareGroupContextToMessages(prev, {
+            userMessageId: userMsg.id,
+            assistantIds: assistantMsgs.map((assistant) => assistant.id),
+            context,
+          });
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
+        });
       };
 
       const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: ChatStreamRunResult) => {
@@ -376,18 +410,21 @@ export function useChatCompareSendRuntime({
             (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
             (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
           );
-          if (existingIndex === -1) return [...prev, serverBoundAssistant];
-          return patchMessageById(prev, prev[existingIndex].id, (m) => ({
-            ...m,
-            ...serverBoundAssistant,
-            ...buildRecoverableResultPatch({
-              serverMessageId: streamResult.serverMessageId,
-              generationTaskId: streamResult.generationTaskId,
-              existingServerMessageId: m.serverMessageId,
-              existingGenerationTaskId: m.generationTaskId,
-              busyActivityStatus: createBusyGeneratingStatus(translate),
-            }),
-          }));
+          const next = existingIndex === -1
+            ? [...prev, serverBoundAssistant]
+            : patchMessageById(prev, prev[existingIndex].id, (m) => ({
+              ...m,
+              ...serverBoundAssistant,
+              ...buildRecoverableResultPatch({
+                serverMessageId: streamResult.serverMessageId,
+                generationTaskId: streamResult.generationTaskId,
+                existingServerMessageId: m.serverMessageId,
+                existingGenerationTaskId: m.generationTaskId,
+                busyActivityStatus: createBusyGeneratingStatus(translate),
+              }),
+            }));
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
         });
       };
 
@@ -407,7 +444,11 @@ export function useChatCompareSendRuntime({
           now: now(),
         });
 
-        setMessages((prev) => patchMessageById(prev, assistantMsg.id, decision.patch));
+        setMessages((prev) => {
+          const next = patchMessageById(prev, assistantMsg.id, decision.patch);
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
+        });
         if (decision.type === "recoverable_busy" && decision.shouldStartBackgroundPolling && decision.serverMessageId) {
           startBackgroundPolling(convId, assistantMsg.id, decision.serverMessageId);
         }
@@ -436,7 +477,11 @@ export function useChatCompareSendRuntime({
             onGroupContextResolved: handleCompareGroupContextResolved,
             onRecoverableResult: handleCompareRecoverableResult,
             onAbortUser: (assistantMsg) => {
-              setMessages((prev) => patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(now())));
+              setMessages((prev) => {
+                const next = patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(now()));
+                syncCompareMessagesToRuntime(convId, next, compareModelIds);
+                return next;
+              });
             },
             onRunError: handleCompareRunError,
             getAbortReason: () => abortReasonRef.current,
