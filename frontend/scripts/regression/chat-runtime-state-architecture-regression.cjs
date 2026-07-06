@@ -127,11 +127,89 @@ const path = require('node:path');
   assert.equal(newerDecision.accepted, true, 'newer restore snapshot should be accepted');
   assert.equal(newerDecision.reason, 'remote_snapshot_newer');
 
+  const e2e = createConversationRuntimeStore();
+  e2e.patchConversation(-1, { messages: [], pendingOptimisticMessages: [], compareModels: [], updatedAt: 1000 });
+  e2e.setActiveConversation(-1);
+  e2e.deleteConversation(-1);
+  e2e.patchConversation(401, { messages: [], pendingOptimisticMessages: [], compareModels: [], updatedAt: 1100 });
+  e2e.setActiveConversation(401);
+  assert.equal(e2e.getSnapshot().activeConversationId, 401, 'created real conversation should become active');
+
+  const optimisticUser = { id: 'u-local', role: 'user', content: 'hello' };
+  const pendingAssistant = { id: 'a-server', role: 'assistant', content: '', serverMessageId: 777, generationTaskId: 888 };
+  e2e.patchConversation(401, {
+    messages: [optimisticUser, pendingAssistant],
+    pendingOptimisticMessages: [pendingAssistant],
+    updatedAt: 1200,
+  });
+  assert.deepEqual(e2e.getConversation(401).messages.map((message) => message.id), ['u-local', 'a-server'], 'send optimistic messages should land in runtime slice');
+  assert.deepEqual(e2e.getConversation(401).pendingOptimisticMessages.map((message) => message.id), ['a-server'], 'pending assistant should be visible in runtime slice');
+
+  e2e.patchConversation(401, {
+    activeStreams: { 'a-server': { convId: 401, serverMessageId: 777, generationTaskId: 888, main: true } },
+    generationTasks: { '888': { convId: 401, serverMessageId: 777, generationTaskId: 888, localMessageId: 'a-server' } },
+    updatedAt: 1300,
+  });
+  assert.equal(e2e.getConversation(401).activeStreams['a-server'].main, true, 'main stream active state should be tracked');
+  assert.equal(e2e.getConversation(401).generationTasks['888'].localMessageId, 'a-server', 'generation task metadata should point back to local message');
+
+  e2e.patchConversation(401, {
+    activeStreams: { 'a-server': { convId: 401, serverMessageId: 777, generationTaskId: 888, lastSequence: 2, content: 'partial' } },
+    generationTasks: { '888': { convId: 401, serverMessageId: 777, generationTaskId: 888, localMessageId: 'a-server', lastSequence: 2, content: 'partial' } },
+    updatedAt: 1400,
+  });
+  assert.equal(e2e.getConversation(401).activeStreams['a-server'].lastSequence, 2, 'task stream resume metadata should replace main-stream metadata');
+
+  e2e.patchConversation(401, {
+    messages: [{ ...optimisticUser, serverMessageId: 776 }, { ...pendingAssistant, content: 'final', completedAt: 1500 }],
+    activeStreams: { 'a-server': { convId: 401, serverMessageId: 777, polling: true } },
+    generationTasks: { '888': { convId: 401, serverMessageId: 777, generationTaskId: 888, localMessageId: 'a-server' } },
+    pendingOptimisticMessages: [],
+    updatedAt: 1500,
+  });
+  assert.equal(e2e.getConversation(401).messages[1].content, 'final', 'background polling should sync final message content');
+  assert.equal(e2e.getConversation(401).pendingOptimisticMessages.length, 0, 'completed send should clear pending optimistic messages');
+  assert.equal(e2e.getConversation(401).activeStreams['a-server'].polling, true, 'polling state should coexist with final message reconciliation until finished');
+
+  e2e.patchConversation(401, {
+    activeStreams: {},
+    generationTasks: {},
+    updatedAt: 1600,
+  });
+  assert.deepEqual(e2e.getConversation(401).activeStreams, {}, 'finished polling should clear only active stream metadata');
+  assert.equal(e2e.getConversation(401).messages[1].content, 'final', 'clearing active streams must not drop messages');
+
+  e2e.patchConversation(401, {
+    messages: [{ id: 'u-remote', role: 'user', content: 'hello' }, { id: 'a-remote', role: 'assistant', content: 'final', serverMessageId: 777, generationTaskId: 888, completedAt: 1700 }],
+    compareModels: ['m1', 'm2'],
+    activeStreams: {},
+    generationTasks: {},
+    pendingOptimisticMessages: [],
+    updatedAt: 1700,
+  });
+  const restoredSlice = e2e.getConversation(401);
+  assert.deepEqual(restoredSlice.messages.map((message) => message.id), ['u-remote', 'a-remote'], 'restore/cache snapshot should replace messages in the same runtime slice');
+  assert.deepEqual(restoredSlice.compareModels, ['m1', 'm2'], 'compare metadata should survive restore/cache convergence');
+  assert.deepEqual(restoredSlice.activeStreams, {}, 'restore terminal snapshot should not resurrect stale active streams');
+  assert.equal(restoredSlice.pendingOptimisticMessages.length, 0, 'restore terminal snapshot should not resurrect stale pending messages');
+
   const repoRoot = path.resolve(__dirname, '../..');
   const createRuntimeSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatConversationCreateRuntime.ts'), 'utf8');
+  const singleSendSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatSingleSendRuntime.ts'), 'utf8');
+  const compareSendSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatCompareSendRuntime.ts'), 'utf8');
+  const mainStreamSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatMainStreamRuntime.ts'), 'utf8');
+  const taskStreamSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatTaskStreamRuntime.ts'), 'utf8');
+  const backgroundPollingSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatBackgroundPollingRuntime.ts'), 'utf8');
+  const restoreSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatConversationRestoreRuntime.ts'), 'utf8');
   assert.ok(createRuntimeSource.includes('chatRuntimeStore'), 'conversation create runtime should seed the shared runtime store');
   assert.ok(createRuntimeSource.includes('setActiveConversation(data.id)'), 'created conversations should become the explicit active runtime conversation');
   assert.ok(createRuntimeSource.includes('deleteConversation(tempConversationId)'), 'failed/replaced temp conversations should be removed from the runtime store');
+  assert.ok(singleSendSource.includes('pendingOptimisticMessages'), 'single send runtime should sync pending optimistic assistants into the runtime store');
+  assert.ok(compareSendSource.includes('syncCompareMessagesToRuntime'), 'compare send runtime should sync local/compare messages into the runtime store');
+  assert.ok(mainStreamSource.includes('syncMainStreamToRuntime'), 'main stream runtime should sync active/final state into the runtime store');
+  assert.ok(taskStreamSource.includes('syncActiveTaskStreamsToRuntime'), 'task stream runtime should sync active task metadata into the runtime store');
+  assert.ok(backgroundPollingSource.includes('syncBackgroundPollingToRuntime'), 'background polling runtime should sync polling/message state into the runtime store');
+  assert.ok(restoreSource.includes('syncRestoreSnapshotToRuntime'), 'restore runtime should sync cache/restore snapshots into the runtime store');
 
   console.log(JSON.stringify({ ok: true, notifications: notificationCount, aborted: aborted.length }, null, 2));
 })().catch((error) => {
