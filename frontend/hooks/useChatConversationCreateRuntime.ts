@@ -7,6 +7,7 @@ import {
   shouldCreateConversation,
 } from "@/lib/chatConversationCreateCoordinator";
 import { readAuthState } from "@/lib/auth/state";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 export type UseChatConversationCreateRuntimeOptions = {
   apiBaseUrl: string;
@@ -51,6 +52,13 @@ export function useChatConversationCreateRuntime({
           workspaceId: getWorkspaceId(),
         });
         if (!notebookId) {
+          chatRuntimeStore.patchConversation(tempConversationId, {
+            messages: [],
+            pendingOptimisticMessages: [],
+            compareModels: [],
+            updatedAt: Date.parse(optimisticUpdatedAt),
+          });
+          chatRuntimeStore.setActiveConversation(tempConversationId);
           dispatchWindowEvent(new CustomEvent("conversation-updated", {
             detail: {
               id: tempConversationId,
@@ -69,11 +77,23 @@ export function useChatConversationCreateRuntime({
           body,
         });
         if (!data) {
-          if (!notebookId) dispatchWindowEvent(new CustomEvent("conversation-deleted", { detail: { id: tempConversationId } }));
+          if (!notebookId) {
+            chatRuntimeStore.deleteConversation(tempConversationId);
+            dispatchWindowEvent(new CustomEvent("conversation-deleted", { detail: { id: tempConversationId } }));
+          }
           return undefined;
         }
 
         setCreatedConversation(data.id, resolveCreatedConversationTitle(data, title));
+        if (!notebookId) {
+          chatRuntimeStore.deleteConversation(tempConversationId);
+          chatRuntimeStore.patchConversation(data.id, {
+            messages: [],
+            compareModels: [],
+            updatedAt: Date.parse(data.updated_at || optimisticUpdatedAt),
+          });
+          chatRuntimeStore.setActiveConversation(data.id);
+        }
         replaceHistory(buildCreatedConversationUrl({
           currentHref: getCurrentHref(),
           conversationId: data.id,
@@ -85,7 +105,10 @@ export function useChatConversationCreateRuntime({
         return data.id;
       } catch (err) {
         console.error("createConversation error:", err);
-        if (!notebookId) dispatchWindowEvent(new CustomEvent("conversation-deleted", { detail: { id: tempConversationId } }));
+        if (!notebookId) {
+          chatRuntimeStore.deleteConversation(tempConversationId);
+          dispatchWindowEvent(new CustomEvent("conversation-deleted", { detail: { id: tempConversationId } }));
+        }
         return undefined;
       }
     },

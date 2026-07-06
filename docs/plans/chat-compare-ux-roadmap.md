@@ -36,7 +36,7 @@
 | P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化、当前 DOM marker、真实 Compare 双列 Activity inline/split 均有 live 回归覆盖。 |
 | P3 | 阅读效率 | ✅/🟡 | 桌面 Chat/Compare 阅读定位主线已完成：message 精确回跳、block-level jump、高亮、code/table block-local 回归、Compare 长回答 action 可达；移动端 Compare 与收藏片段仍后置。 |
 | P4 | 侧栏/历史体验 | ✅ | `useChatSidebarHistory` 已抽出并补齐 optimistic pipeline：新会话 temp→canonical 原地替换、标题弱 pending、active 高亮连续、rename/delete/pin 统一更新、load-more 锚点保护与 fixture 覆盖。 |
-| P5 | 长期状态架构 | 🟡 | Markdown 渲染长期主干已落地为 `StableMarkdownRenderer`；ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
+| P5 | 长期状态架构 | 🟡 | 第一包已落地：ConversationRuntimeStore / StreamOwnerRegistry / mergeConversationSnapshot 核心模块与回归已建立，并低风险接入新会话创建 adapter；restore/bootstrap/stream 全量迁移仍是后续工作。 |
 
 ---
 
@@ -523,7 +523,7 @@ const {
 
 ### 12. Chat runtime state 收成单一 store
 
-**状态:** ⬜ 未完成
+**状态:** 🟡 第一包已完成，后续逐步迁移 useChat 状态
 
 **附件目标:**
 
@@ -553,11 +553,18 @@ ConversationRuntimeStore
 - UI hook 只订阅当前 conversation slice，减少全局重渲染。
 - 先做 adapter 层，不一次性大重构。
 
+**已完成第一包:**
+
+- 新增 `frontend/lib/chatRuntimeStore.ts`，提供 conversationId 分片的 runtime store，覆盖 messages、generationTasks、activeStreams、pendingOptimisticMessages、compareModels、activityTarget、scrollState。
+- 新增 `frontend/lib/chatRuntime.ts` 统一导出全局 `chatRuntimeStore`。
+- `useChatConversationCreateRuntime` 已低风险接入：创建请求发出前写入 temp runtime conversation，服务端 id 返回后删除 temp 并设置 canonical active conversation；失败时清理 temp。
+- 新增 `npm run test:chat-runtime-state-architecture` 并纳入 `test:chat-runtime`。
+
 ---
 
 ### 13. Stream ownership 正式化
 
-**状态:** 🟡 部分完成
+**状态:** 🟡 第一包已完成 owner registry，后续接入真实 stream runtime
 
 **已完成:**
 
@@ -586,11 +593,16 @@ conversationId -> activeStreams
 - 所有 stream finally 都走 `registry.canFinalize(owner)`。
 - live 回归覆盖：切会话、stop、resume、compare 双列并发。
 
+**已完成第一包:**
+
+- 新增 `frontend/lib/chatStreamOwnerRegistry.ts`，支持 owner register、replacement abort、`canFinalize(owner)`、stale finalize no-op、conversation-level abort。
+- 回归覆盖 replacement owner 不能 finalize、new owner 可以 finalize、conversation abort 清理 owner。
+
 ---
 
 ### 14. Restore / bootstrap 版本机制更硬
 
-**状态:** 🟡 部分完成
+**状态:** 🟡 第一包已完成 merge decision 核心，后续接入 restore/bootstrap 调用点
 
 **已完成:**
 
@@ -616,6 +628,11 @@ conversationId -> activeStreams
 ```
 
 - 加 fixture 覆盖 bootstrap / restore / stream / optimistic 的冲突组合。
+
+**已完成第一包:**
+
+- 新增 `frontend/lib/chatConversationSnapshotMerge.ts`，输出 `{ accepted, reason, snapshot }`。
+- 已覆盖：`remote_conversation_mismatch`、`remote_snapshot_older_than_active_stream`、`local_optimistic_newer_than_bootstrap`、`remote_completed_terminal_wins`、`remote_snapshot_newer`。
 
 ---
 
