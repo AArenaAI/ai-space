@@ -126,7 +126,7 @@ export function StreamingText({
   return (
     <Host className={className}>
       {hasReason && (
-        <div className="mb-2">
+        <div className="mb-2" data-chat-stream-reasoning-slot="true">
           <button
             type="button"
             aria-expanded={false}
@@ -145,6 +145,7 @@ export function StreamingText({
         <span
           data-i18n-skip="true"
           data-chat-answer-stable-layer="true"
+          data-chat-stream-content-slot="true"
           data-chat-answer-content-source={answerContentSource}
           data-chat-answer-canonical-match={preferCanonicalContent ? String(realtimeMatchesCanonical) : undefined}
           className="streaming-answer-markdown block break-words"
@@ -153,7 +154,7 @@ export function StreamingText({
         </span>
       )}
       {showInitialReasoningStatus && (
-        <div className="mb-2 flex min-h-[4.25rem] items-start" data-chat-initial-reasoning-status="true">
+        <div className="mb-2 flex min-h-[4.25rem] items-start" data-chat-initial-reasoning-status="true" data-chat-stream-reasoning-slot="true">
           <button
             type="button"
             aria-expanded={false}

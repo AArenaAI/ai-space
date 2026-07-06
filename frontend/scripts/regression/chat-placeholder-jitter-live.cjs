@@ -61,6 +61,10 @@ const installSampler = () => {
       const rect = row.getBoundingClientRect();
       const answerNode = row.querySelector('[data-chat-answer-renderer="true"]');
       const stableLayer = row.querySelector('[data-chat-answer-stable-layer="true"]');
+      const reasoningSlot = row.querySelector('[data-chat-stream-reasoning-slot="true"]');
+      const contentSlot = row.querySelector('[data-chat-stream-content-slot="true"]');
+      const sourceEntry = row.querySelector('[data-chat-stream-source-entry="true"]');
+      const initialReasoningStatus = row.querySelector('[data-chat-initial-reasoning-status="true"]');
       const stableMarkdown = row.querySelector('[data-stable-markdown-renderer="true"]');
       const tokenRenderer = row.querySelector('[data-markdown-token-renderer]');
       const streamingMarkdown = row.querySelector('[data-streaming-markdown-mode]');
@@ -73,6 +77,10 @@ const installSampler = () => {
       const actionsNode = row.querySelector('[data-message-actions="true"]');
       const answerRect = answerNode?.getBoundingClientRect();
       const stableRect = stableLayer?.getBoundingClientRect();
+      const reasoningRect = reasoningSlot?.getBoundingClientRect();
+      const contentRect = contentSlot?.getBoundingClientRect();
+      const sourceRect = sourceEntry?.getBoundingClientRect();
+      const initialReasoningRect = initialReasoningStatus?.getBoundingClientRect();
       const actionsRect = actionsNode?.getBoundingClientRect();
       const text = (row.textContent || '').replace(/\s+/g, ' ').trim();
       return {
@@ -99,6 +107,12 @@ const installSampler = () => {
         top: Math.round(rect.top),
         height: Math.round(rect.height),
         answerHeight: Math.round(answerRect?.height || 0),
+        reasoningSlotHeight: Math.round(reasoningRect?.height || 0),
+        contentSlotHeight: Math.round(contentRect?.height || 0),
+        sourceEntryHeight: Math.round(sourceRect?.height || 0),
+        initialReasoningHeight: Math.round(initialReasoningRect?.height || 0),
+        contentTextLength: (contentSlot?.textContent || '').replace(/\s+/g, ' ').trim().length,
+        answerChildCount: answerNode?.children.length || 0,
         actionsHeight: Math.round(actionsRect?.height || 0),
         actionsClass: String(actionsNode?.className || ''),
         placeholderCount: row.querySelectorAll('[data-chat-initial-reasoning-status="true"], [data-chat-empty-streaming-placeholder="true"]').length,
@@ -131,6 +145,13 @@ const installSampler = () => {
       latestAssistant,
       latestAssistantId: latestAssistant?.id || '',
       latestAssistantHeight: latestAssistant?.height || 0,
+      latestAnswerHeight: latestAssistant?.answerHeight || 0,
+      latestReasoningSlotHeight: latestAssistant?.reasoningSlotHeight || 0,
+      latestContentSlotHeight: latestAssistant?.contentSlotHeight || 0,
+      latestSourceEntryHeight: latestAssistant?.sourceEntryHeight || 0,
+      latestInitialReasoningHeight: latestAssistant?.initialReasoningHeight || 0,
+      latestContentTextLength: latestAssistant?.contentTextLength || 0,
+      latestAnswerChildCount: latestAssistant?.answerChildCount || 0,
       latestAssistantTop: latestAssistant?.top || 0,
         latestPlaceholderCount: latestAssistant?.placeholderCount || 0,
       latestTextPrefix: latestAssistant?.textPrefix || '',
@@ -181,13 +202,72 @@ async function waitForChatIdle(page, timeoutMs = 45000) {
 }
 
 function analyzeRound(samples) {
-  const firstPlaceholderIndex = samples.findIndex((s) => s.latestPlaceholderCount > 0);
-  const activeSamples = firstPlaceholderIndex >= 0 ? samples.slice(firstPlaceholderIndex) : samples;
+  const finalAssistantId = [...samples].reverse().find((s) => s.latestAssistantId)?.latestAssistantId || '';
+  const firstCurrentAssistantIndex = finalAssistantId ? samples.findIndex((s) => s.latestAssistantId === finalAssistantId) : -1;
+  const samplesForCurrentAssistant = firstCurrentAssistantIndex >= 0 ? samples.slice(firstCurrentAssistantIndex) : samples;
+  const firstPlaceholderIndex = samplesForCurrentAssistant.findIndex((s) => s.latestPlaceholderCount > 0);
+  const activeSamples = firstPlaceholderIndex >= 0 ? samplesForCurrentAssistant.slice(firstPlaceholderIndex) : samplesForCurrentAssistant;
   const ids = activeSamples.map((s) => s.latestAssistantId).filter(Boolean);
   const distinctIds = Array.from(new Set(ids));
   const heights = activeSamples.map((s) => s.latestAssistantHeight).filter((value) => value > 0);
   const heightDeltas = heights.slice(1).map((value, index) => value - heights[index]);
   const maxHeightJump = heightDeltas.length ? Math.max(...heightDeltas.map(Math.abs)) : 0;
+  const jumpDetailThreshold = Number(process.env.JITTER_JUMP_DETAIL_THRESHOLD || '48');
+  const largeJumpDetails = [];
+  for (let i = 1; i < activeSamples.length; i += 1) {
+    const prev = activeSamples[i - 1];
+    const next = activeSamples[i];
+    const delta = Number(next.latestAssistantHeight || 0) - Number(prev.latestAssistantHeight || 0);
+    if (!prev.latestAssistantHeight || !next.latestAssistantHeight || Math.abs(delta) < jumpDetailThreshold) continue;
+    const contentDelta = Number(next.latestContentSlotHeight || 0) - Number(prev.latestContentSlotHeight || 0);
+    const reasoningDelta = Number(next.latestReasoningSlotHeight || 0) - Number(prev.latestReasoningSlotHeight || 0);
+    const sourceDelta = Number(next.latestSourceEntryHeight || 0) - Number(prev.latestSourceEntryHeight || 0);
+    const answerDelta = Number(next.latestAnswerHeight || 0) - Number(prev.latestAnswerHeight || 0);
+    const textDelta = Number(next.latestContentTextLength || 0) - Number(prev.latestContentTextLength || 0);
+    const candidates = [
+      ['content-growth', contentDelta],
+      ['reasoning-slot', reasoningDelta],
+      ['source-entry', sourceDelta],
+      ['answer-wrapper', answerDelta],
+      ['text-growth', textDelta],
+    ];
+    const [likelySource] = candidates.reduce((best, current) => Math.abs(current[1]) > Math.abs(best[1]) ? current : best, ['unknown', 0]);
+    largeJumpDetails.push({
+      sampleIndex: i,
+      likelySource,
+      delta,
+      from: {
+        height: prev.latestAssistantHeight,
+        answerHeight: prev.latestAnswerHeight,
+        reasoningSlotHeight: prev.latestReasoningSlotHeight,
+        contentSlotHeight: prev.latestContentSlotHeight,
+        sourceEntryHeight: prev.latestSourceEntryHeight,
+        initialReasoningHeight: prev.latestInitialReasoningHeight,
+        contentTextLength: prev.latestContentTextLength,
+        answerChildCount: prev.latestAnswerChildCount,
+        answerState: prev.latestAnswerState,
+        tokenRendererMode: prev.latestTokenRendererMode,
+        stableMarkdownPhase: prev.latestStableMarkdownPhase,
+        placeholderCount: prev.latestPlaceholderCount,
+        textPrefix: prev.latestTextPrefix,
+      },
+      to: {
+        height: next.latestAssistantHeight,
+        answerHeight: next.latestAnswerHeight,
+        reasoningSlotHeight: next.latestReasoningSlotHeight,
+        contentSlotHeight: next.latestContentSlotHeight,
+        sourceEntryHeight: next.latestSourceEntryHeight,
+        initialReasoningHeight: next.latestInitialReasoningHeight,
+        contentTextLength: next.latestContentTextLength,
+        answerChildCount: next.latestAnswerChildCount,
+        answerState: next.latestAnswerState,
+        tokenRendererMode: next.latestTokenRendererMode,
+        stableMarkdownPhase: next.latestStableMarkdownPhase,
+        placeholderCount: next.latestPlaceholderCount,
+        textPrefix: next.latestTextPrefix,
+      },
+    });
+  }
   const settleSamples = activeSamples.filter((s) => String(s.phase || '').includes('settle'));
   const settleHeights = settleSamples.map((s) => s.latestAssistantHeight).filter((value) => value > 0);
   const settleHeightDeltas = settleHeights.slice(1).map((value, index) => value - settleHeights[index]);
@@ -284,10 +364,11 @@ function analyzeRound(samples) {
   return {
     distinctIds,
     latestIdChanged: distinctIds.length > 1,
-    ignoredWarmupSamples: Math.max(0, firstPlaceholderIndex),
+    ignoredWarmupSamples: Math.max(0, firstCurrentAssistantIndex) + Math.max(0, firstPlaceholderIndex),
     heights,
     heightDeltas,
     maxHeightJump,
+    largeJumpDetails: largeJumpDetails.slice(0, 12),
     settleHeightDeltas,
     maxSettleHeightJump,
     placeholderHeights,

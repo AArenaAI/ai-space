@@ -83,7 +83,7 @@ export function AssistantAnswerRenderer({
     return (
       <div data-chat-answer-renderer="true" data-chat-answer-render-state={renderState}>
         {showSourceOnlyActivityEntry && (
-          <div className="mt-1 mb-2">
+          <div className="mt-1 mb-2" data-chat-stream-source-entry="true">
             <button
               type="button"
               aria-expanded={false}
@@ -137,7 +137,7 @@ export function AssistantAnswerRenderer({
         />
       )}
       {showSourceOnlyActivityEntry && (
-        <div className="mt-1 mb-2">
+        <div className="mt-1 mb-2" data-chat-stream-source-entry="true">
           <button
             type="button"
             aria-expanded={false}
