@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-const { chromium } = require('playwright');
-const { env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 function passwordFromCodes() {
   const codes = env('TESTNET_PASSWORD_CODES');
@@ -159,7 +158,7 @@ async function inspectActivity(page) {
     const hasProductProcessCopy = fullTexts.every((text) => text.includes('生成过程') && text.includes('模型思考'));
     const hasReferenceSources = panels.length > 0 && fullTexts.every((text) => text.includes('参考来源')) && sourceLinkCounts.every((count) => count > 0);
     const hasRepeatedReasoningHeading = texts.some((text) => text.includes('生成过程思考过程'));
-    const compareColumns = Array.from(document.querySelectorAll('[data-compare-column-scroll-container="true"]'));
+    const compareColumns = Array.from(document.querySelectorAll('[data-chat-compare-column-shell="true"]'));
     const openColumnCount = compareColumns.filter((column) => column.querySelector('[data-chat-activity-panel="true"]')).length;
     const visiblePanels = panels.filter((panel) => {
       const rect = panel.getBoundingClientRect();
@@ -179,22 +178,23 @@ async function inspectActivity(page) {
   const auth = await login({ baseUrl, email, password });
   const created = await createCompareConversation({ baseUrl, token: auth.token, models, prompt });
 
-  const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const { browser, page } = await openAuthedPage({
+    baseUrl,
+    token: auth.token,
+    user: auth.user,
+    sessionToken: auth.sessionToken,
+    refreshToken: auth.refreshToken,
+    viewport: { width: 1440, height: 1000 },
+  });
   const consoleEvents = [];
   const pageErrors = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-  }, { token: auth.token, user: auth.user });
-
   await page.goto(`${baseUrl}/chat/?id=${created.conversation.id}&compare_activity_dual=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(1500);
   await chooseCompareModeIfNeeded(page);
-  await page.locator('[data-compare-column-scroll-container="true"]').first().waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator('[data-chat-compare-column-shell="true"]').first().waitFor({ state: 'visible', timeout: 20000 });
 
   await selectActivityLayout(page, /列内展开|inline/i);
   const clickedInline = await clickAllReasoningEntries(page);
