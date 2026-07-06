@@ -9,7 +9,7 @@ const projectRoot = path.resolve(__dirname, "../..");
 
 function loadModule() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-conversation-restore-coordinator-regression-"));
-  for (const name of ["chatForkCoordinator", "chatBootstrapCoordinator", "chatConversationRestoreCoordinator"]) {
+  for (const name of ["chatForkCoordinator", "chatBootstrapCoordinator", "chatConversationSnapshotMerge", "chatConversationRestoreCoordinator"]) {
     let source = fs.readFileSync(path.join(projectRoot, `lib/${name}.ts`), "utf8");
     source = source.replace(
       /import \{ normalizeError, readApiError \} from "@\/lib\/errors";\n/g,
@@ -24,11 +24,13 @@ function loadModule() {
   const restorePath = path.join(tmpDir, "chatConversationRestoreCoordinator.js");
   const bootstrapPath = path.join(tmpDir, "chatBootstrapCoordinator.js");
   const forkPath = path.join(tmpDir, "chatForkCoordinator.js");
+  const mergePath = path.join(tmpDir, "chatConversationSnapshotMerge.js");
   const Module = require("module");
   const originalLoad = Module._load;
   Module._load = function(request, parent, isMain) {
     if (request === "@/lib/chatBootstrapCoordinator") return originalLoad(bootstrapPath, parent, isMain);
     if (request === "./chatForkCoordinator") return originalLoad(forkPath, parent, isMain);
+    if (request === "./chatConversationSnapshotMerge") return originalLoad(mergePath, parent, isMain);
     if (request.startsWith("@/")) return {};
     return originalLoad(request, parent, isMain);
   };
@@ -38,6 +40,8 @@ function loadModule() {
     Module._load = originalLoad;
   }
 }
+
+const restoreRuntimeSource = fs.readFileSync(path.join(projectRoot, "hooks/useChatConversationRestoreRuntime.ts"), "utf8");
 
 const {
   DEFAULT_CONVERSATION_RESTORE_TAIL,
@@ -51,6 +55,7 @@ const {
   buildActiveTaskStreamsByServerMessageId,
   mergeActiveTaskStreamsIntoMessages,
   buildConversationRestoreState,
+  buildConversationRestoreMergeDecision,
   findLastAssistantStatusTarget,
   buildConversationStatusDecision,
   parseConversationCompareModels,
@@ -226,6 +231,61 @@ const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
     assert.equal(state.mergedMessages[1].activityStatus.kind, "generating");
   });
 
+  await test("buildConversationRestoreMergeDecision rejects stale restore over active stream", () => {
+    const decision = buildConversationRestoreMergeDecision({
+      conversationId: 7,
+      source: "restore",
+      currentMessages: [{ id: "local-a", role: "assistant", content: "live", generationTaskId: 55 }],
+      currentSnapshotVersion: "10",
+      currentUpdatedAt: 10_000,
+      pendingOptimisticMessages: [],
+      activeEntries: [["local-a", { convId: 7, serverMessageId: 22, generationTaskId: 55, content: "live" }]],
+      restoreData: {
+        snapshot_version: "9",
+        messages: [{ id: 22, role: "assistant", content: "stale", generation_task_id: 55 }],
+      },
+    });
+    assert.equal(decision.accepted, false);
+    assert.equal(decision.reason, "remote_snapshot_older_than_active_stream");
+  });
+
+  await test("buildConversationRestoreMergeDecision rejects bootstrap over optimistic local messages", () => {
+    const decision = buildConversationRestoreMergeDecision({
+      conversationId: 7,
+      source: "bootstrap",
+      currentMessages: [{ id: "u-local", role: "user", content: "fresh" }],
+      currentSnapshotVersion: "1",
+      currentUpdatedAt: 1000,
+      pendingOptimisticMessages: [{ id: "u-local", role: "user", content: "fresh" }],
+      activeEntries: [],
+      restoreData: {
+        snapshot_version: "2",
+        messages: [{ id: 1, role: "user", content: "old" }],
+      },
+    });
+    assert.equal(decision.accepted, false);
+    assert.equal(decision.reason, "local_optimistic_newer_than_bootstrap");
+  });
+
+  await test("buildConversationRestoreMergeDecision accepts terminal backend status over running local task", () => {
+    const decision = buildConversationRestoreMergeDecision({
+      conversationId: 7,
+      source: "restore",
+      currentMessages: [{ id: "local-a", role: "assistant", content: "", generationTaskId: 55, serverGenerationStatus: "running" }],
+      currentSnapshotVersion: "10",
+      currentUpdatedAt: 10_000,
+      pendingOptimisticMessages: [],
+      activeEntries: [["local-a", { convId: 7, serverMessageId: 22, generationTaskId: 55, content: "" }]],
+      restoreData: {
+        snapshot_version: "9",
+        messages: [{ id: 22, role: "assistant", content: "done", generation_task_id: 55, generation_status: "completed" }],
+        last_assistant_status: { message: { id: 22, content: "done" }, background_task: { id: 55, status: "completed" } },
+      },
+    });
+    assert.equal(decision.accepted, true);
+    assert.equal(decision.reason, "remote_completed_terminal_wins");
+  });
+
   await test("findLastAssistantStatusTarget skips active last assistant", () => {
     const messages = [
       { id: "1", role: "assistant", content: "a", createdAt: 1, serverMessageId: 1 },
@@ -281,6 +341,12 @@ const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
     assert.equal(done.patch.completedAt, 1234);
     assert.equal(done.patch.activityStatus, undefined);
     assert.equal(done.resume, undefined);
+  });
+
+  await test("restore runtime applies merge decision before backend restore state", () => {
+    assert.ok(restoreRuntimeSource.includes("buildConversationRestoreMergeDecision"), "restore runtime should call merge decision helper");
+    assert.ok(restoreRuntimeSource.includes("restore-merge-rejected"), "restore runtime should emit rejected merge reason");
+    assert.ok(restoreRuntimeSource.indexOf("buildConversationRestoreMergeDecision") < restoreRuntimeSource.indexOf("buildConversationRestoreState"), "merge decision should run before applying backend restore state");
   });
 
   await test("parse compare models and resolve skill key", () => {

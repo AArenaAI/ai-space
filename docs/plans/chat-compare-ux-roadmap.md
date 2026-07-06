@@ -602,7 +602,7 @@ conversationId -> activeStreams
 
 ### 14. Restore / bootstrap 版本机制更硬
 
-**状态:** 🟡 第一包已完成 merge decision 核心，后续接入 restore/bootstrap 调用点
+**状态:** 🟡 第二包已完成 restore/bootstrap 接入第一步，后续继续迁移更多调用点
 
 **已完成:**
 
@@ -633,6 +633,13 @@ conversationId -> activeStreams
 
 - 新增 `frontend/lib/chatConversationSnapshotMerge.ts`，输出 `{ accepted, reason, snapshot }`。
 - 已覆盖：`remote_conversation_mismatch`、`remote_snapshot_older_than_active_stream`、`local_optimistic_newer_than_bootstrap`、`remote_completed_terminal_wins`、`remote_snapshot_newer`。
+
+**已完成第二包:**
+
+- 新增 `buildConversationRestoreMergeDecision`，把 `ConversationRestoreResponse` 归一为 merge snapshot。
+- `useChatConversationRestoreRuntime` 在 backend restore response 应用前先执行 merge decision；拒绝时保留当前 UI/cache，只关闭 loading history。
+- 新增 `restore-merge-rejected` performance event，透出 rejected reason，便于后续调试 stale bootstrap/restore。
+- 回归覆盖：active stream 拒绝 stale restore、bootstrap 不覆盖 optimistic local、terminal backend status 可替换 running local task、hook 在应用 backend restore state 前调用 decision。
 
 ---
 

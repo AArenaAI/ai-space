@@ -5,6 +5,7 @@ import {
   mapPersistedChatMessages,
   parsePersistedStatusTimeline,
 } from "./chatForkCoordinator";
+import { mergeConversationSnapshot } from "./chatConversationSnapshotMerge";
 import { buildChatBootstrapUrl, defaultBootstrapSleep, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 
 export type ConversationRestoreResponse = {
@@ -86,6 +87,13 @@ export type ConversationRestoreStatusDecision = {
     lastSequence: number;
     initialContent: string;
   };
+};
+
+export type ConversationRestoreMergeSource = "bootstrap" | "restore";
+
+export type ConversationRestoreMergeDecision = {
+  accepted: boolean;
+  reason: string;
 };
 
 export const DEFAULT_CONVERSATION_RESTORE_TAIL = 32;
@@ -346,6 +354,80 @@ export function buildConversationRestoreState({
   };
 }
 
+function parseSnapshotVersionNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return 0;
+  const parsed = Number(value.replace(/^[^\d.-]+/, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeRestoreSnapshotMessages(data: ConversationRestoreResponse): Array<Record<string, unknown>> {
+  const messages = (data.messages || []).map((message) => ({
+    ...message,
+    generation_task_id: (message as any).generation_task_id ?? (message as any).generationTaskId,
+    generation_status: (message as any).generation_status ?? (message as any).serverGenerationStatus,
+  }));
+  const status = data.last_assistant_status;
+  const statusTaskId = status?.background_task?.id || status?.background_task?.task_id;
+  const statusMessageId = status?.message?.id || status?.background_task?.assistant_message_id;
+  if (statusTaskId || statusMessageId || status?.background_task?.status) {
+    messages.push({
+      id: statusMessageId,
+      role: "assistant",
+      content: status?.message?.content || "",
+      generation_task_id: statusTaskId,
+      generation_status: status?.background_task?.status,
+    });
+  }
+  return messages;
+}
+
+export function buildConversationRestoreMergeDecision({
+  conversationId,
+  source,
+  currentMessages,
+  currentSnapshotVersion,
+  currentUpdatedAt,
+  pendingOptimisticMessages = [],
+  activeEntries,
+  restoreData,
+}: {
+  conversationId: number;
+  source: ConversationRestoreMergeSource;
+  currentMessages: Array<Record<string, unknown>>;
+  currentSnapshotVersion?: string | number;
+  currentUpdatedAt?: number;
+  pendingOptimisticMessages?: Array<Record<string, unknown>>;
+  activeEntries: [string, ActiveConversationTaskStreamInfo][];
+  restoreData: ConversationRestoreResponse;
+}): ConversationRestoreMergeDecision {
+  const activeStreamTaskIds = activeEntries
+    .filter(([, info]) => info.convId === conversationId && info.generationTaskId)
+    .map(([, info]) => info.generationTaskId as number);
+  const decision = mergeConversationSnapshot(
+    {
+      conversationId,
+      snapshotVersion: parseSnapshotVersionNumber(currentSnapshotVersion),
+      updatedAt: currentUpdatedAt || 0,
+      messages: currentMessages,
+      pendingOptimisticMessages,
+      activeTaskIds: activeStreamTaskIds,
+    },
+    {
+      conversationId,
+      snapshotVersion: parseSnapshotVersionNumber(restoreData.snapshot_version),
+      updatedAt: Date.now(),
+      messages: normalizeRestoreSnapshotMessages(restoreData),
+    },
+    {
+      source,
+      currentConversationId: conversationId,
+      activeStreamTaskIds,
+    }
+  );
+  return { accepted: decision.accepted, reason: decision.reason };
+}
+
 export function findLastAssistantStatusTarget(
   messages: ConversationRestoreMessage[],
   activeByServerMessageId: Map<string, unknown>
@@ -375,7 +457,7 @@ export function buildConversationStatusDecision({
   const serverContent = statusData?.message?.content || "";
   const serverReasoningContent = statusData?.message?.reasoning_content || statusData?.message?.reasoning || statusData?.message?.thinking || "";
   const hasContent = serverContent.trim().length > 0;
-  const shouldResumePolling = hasTask && !terminalStatus;
+  const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
   const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
   const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
   const currentMessageSequence = currentMessage.lastSequence || 0;

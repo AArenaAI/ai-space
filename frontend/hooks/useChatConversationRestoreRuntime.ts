@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { v4 as uuidv4 } from "uuid";
 import {
+  buildConversationRestoreMergeDecision,
   buildConversationRestoreState,
   buildConversationStatusDecision,
   fetchConversationMessageCount,
@@ -58,6 +59,7 @@ type ConversationSwitchPerformanceDetail = {
   durationMs?: number;
   messageCount?: number;
   totalMessages?: number;
+  reason?: string;
 };
 
 function emitConversationSwitchPerformanceEvent(
@@ -410,6 +412,7 @@ export function useChatConversationRestoreRuntime({
     let hasDisplayedSnapshot = false;
     let displayedSnapshotSource: ConversationSwitchPerformanceDetail["snapshotSource"];
     let displayedSnapshotVersion: string | undefined = cachedSnapshot?.snapshotVersion;
+    let displayedSnapshot: CachedConversationSnapshot | undefined = cachedSnapshot;
     let persistentSnapshotReady: Promise<void> = Promise.resolve();
     if (cachedSnapshot) {
       hasDisplayedSnapshot = true;
@@ -471,6 +474,7 @@ export function useChatConversationRestoreRuntime({
           hasDisplayedSnapshot = true;
           displayedSnapshotSource = "indexeddb";
           displayedSnapshotVersion = persistentSnapshot.snapshotVersion;
+          displayedSnapshot = persistentSnapshot;
           emitConversationSwitchPerformanceEvent("first-snapshot", {
             conversationId: loadConversationId,
             loadSeq,
@@ -582,6 +586,33 @@ export function useChatConversationRestoreRuntime({
               }
             })
             .catch(() => {});
+        }
+        const pendingOptimisticMessages = Object.values(pendingLocalAssistantsRef?.current || {})
+          .filter((entry) => entry.convId === loadConversationId)
+          .map((entry) => entry.message as Message);
+        const restoreMergeDecision = buildConversationRestoreMergeDecision({
+          conversationId: loadConversationId,
+          source: displayedSnapshotSource === "backend" ? "bootstrap" : "restore",
+          currentMessages: (displayedSnapshot?.messages || []) as unknown as Array<Record<string, unknown>>,
+          currentSnapshotVersion: displayedSnapshotVersion,
+          currentUpdatedAt: displayedSnapshot?.updatedAt,
+          pendingOptimisticMessages: pendingOptimisticMessages as unknown as Array<Record<string, unknown>>,
+          activeEntries,
+          restoreData: data,
+        });
+        if (!restoreMergeDecision.accepted) {
+          emitConversationSwitchPerformanceEvent("restore-merge-rejected", {
+            conversationId: loadConversationId,
+            loadSeq,
+            source: "backend",
+            stage: "revalidate",
+            displayMode: hasDisplayedSnapshot ? "background" : "none",
+            snapshotSource: displayedSnapshotSource ?? "miss",
+            durationMs: elapsedSinceSwitchStart(),
+            reason: restoreMergeDecision.reason,
+          });
+          setIsLoadingHistory(false);
+          return;
         }
         setConversationTitle(data.title || "");
         const restoreState = buildConversationRestoreState({
