@@ -299,7 +299,10 @@ export function useChatSingleSendRuntime({
         if (pendingLocalAssistantsRef && finalAbortReason !== "navigation") {
           delete pendingLocalAssistantsRef.current[activeAssistantId];
           if (convId) {
-            syncSingleSendMessagesToRuntime(convId, lastRuntimeMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
+            chatRuntimeStore.patchConversation(convId, {
+              pendingOptimisticMessages: buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId),
+              updatedAt: Date.now(),
+            });
           }
         }
         const decision = decideSingleSendFinally({

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import type { SetStateAction } from "react";
 import { useChatModelSelection } from "@/hooks/useChatModelSelection";
 import { useChatLocalActions } from "@/hooks/useChatLocalActions";
 import { useChatBackgroundPollingRuntime } from "@/hooks/useChatBackgroundPollingRuntime";
@@ -13,6 +14,7 @@ import { useChatSendRuntime } from "@/hooks/useChatSendRuntime";
 import { useChatConversationRestoreRuntime } from "@/hooks/useChatConversationRestoreRuntime";
 import { useChatGenerationControlsRuntime } from "@/hooks/useChatGenerationControlsRuntime";
 import { useChatRuntimeCleanup } from "@/hooks/useChatRuntimeCleanup";
+import { useConversationRuntimeMessages, useConversationRuntimeSlice } from "@/hooks/useChatRuntimeSelectors";
 import {
   useChatConversationLifecycle,
   useLoadMoreMessagesAction,
@@ -118,7 +120,7 @@ export const MODELS: ChatModel[] = [
 
 export function useChat(conversationId: number | undefined, models: ChatModel[], skillKey?: string, notebookId?: number, notebookFileIds?: number[], modelSelectionOptions?: { storageKey?: string; defaultModelId?: string }, bootstrap?: ChatBootstrapPayload) {
   const { t } = useI18n();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const { selectedModel, setSelectedModel, initialized } = useChatModelSelection(models, modelSelectionOptions);
@@ -156,6 +158,18 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
   const pendingLocalAssistantsRef = useRef<Record<string, { convId?: number; message: Message }>>({});
   const resumedBootstrapTaskKeysRef = useRef<Set<string>>(new Set());
   const abortReasonRef = useRef<"user" | "navigation" | null>(null);
+  const runtimeSlice = useConversationRuntimeSlice(currentConversation);
+  const runtimeMessages = useConversationRuntimeMessages(currentConversation);
+  const messages = currentConversation ? runtimeMessages : localMessages;
+  const setMessages = useCallback((next: SetStateAction<Message[]>) => {
+    if (!currentConversation) {
+      setLocalMessages(next);
+      return;
+    }
+    const previous = chatRuntimeStore.getConversation(currentConversation).messages as Message[];
+    const resolved = typeof next === "function" ? (next as (prev: Message[]) => Message[])(previous) : next;
+    chatRuntimeStore.patchConversation(currentConversation, { messages: resolved, updatedAt: Date.now() });
+  }, [currentConversation]);
   const modelsKey = models.map((m) => m.id).join("|");
   const bootstrapSnapshot: CachedConversationSnapshot | undefined = useMemo(() => {
     if (!bootstrap?.conversation || !bootstrap.snapshot) return undefined;
@@ -549,6 +563,10 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     );
   }, [latestAssistantMessage, messages]);
 
+  const hasRuntimeActiveStream = useMemo(() => Object.keys(runtimeSlice.activeStreams || {}).length > 0, [runtimeSlice.activeStreams]);
+  const hasRuntimeGenerationTask = useMemo(() => Object.keys(runtimeSlice.generationTasks || {}).length > 0, [runtimeSlice.generationTasks]);
+  const hasRuntimePendingOptimistic = useMemo(() => (runtimeSlice.pendingOptimisticMessages || []).length > 0, [runtimeSlice.pendingOptimisticMessages]);
+
   useEffect(() => {
     if (!currentConversation) return;
     setGenerationStore((prev) => ({
@@ -556,28 +574,28 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       [currentConversation]: inferConversationGenerationState({
         conversationId: currentConversation,
         messages,
-        hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
-        hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
-        hasPendingLocalAssistant: hasCurrentPendingLocalAssistant,
-        hasMainStream: hasCurrentMainStream,
+        hasActiveTaskStream: hasRuntimeActiveStream,
+        hasCurrentPoller: hasRuntimeGenerationTask && hasRuntimeActiveStream,
+        hasPendingLocalAssistant: hasCurrentPendingLocalAssistant || hasRuntimePendingOptimistic,
+        hasMainStream: hasCurrentMainStream && hasRuntimeActiveStream,
         previous: prev[currentConversation],
       }),
     }));
-  }, [currentConversation, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream]);
+  }, [currentConversation, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream, hasRuntimeActiveStream, hasRuntimeGenerationTask, hasRuntimePendingOptimistic]);
 
   const isCurrentConversationGenerating = useMemo(() => {
     if (!currentConversation) return false;
     const currentState = inferConversationGenerationState({
       conversationId: currentConversation,
       messages,
-      hasActiveTaskStream: Object.values(activeTaskStreamsRef.current).some((state) => state.convId === currentConversation),
-      hasCurrentPoller: Object.keys(backgroundPollersRef.current).some((messageId) => messages.some((message) => message.id === messageId)),
-      hasPendingLocalAssistant: hasCurrentPendingLocalAssistant,
-      hasMainStream: hasCurrentMainStream,
+      hasActiveTaskStream: hasRuntimeActiveStream,
+      hasCurrentPoller: hasRuntimeGenerationTask && hasRuntimeActiveStream,
+      hasPendingLocalAssistant: hasCurrentPendingLocalAssistant || hasRuntimePendingOptimistic,
+      hasMainStream: hasCurrentMainStream && hasRuntimeActiveStream,
       previous: generationStore[currentConversation],
     });
     return isConversationGenerationActive(currentState);
-  }, [currentConversation, generationStore, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream]);
+  }, [currentConversation, generationStore, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream, hasRuntimeActiveStream, hasRuntimeGenerationTask, hasRuntimePendingOptimistic]);
 
   return {
     messages,

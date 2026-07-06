@@ -61,11 +61,20 @@ export function createConversationRuntimeStore() {
   let activeConversationId: number | undefined;
   const conversations = new Map<number, ConversationRuntimeSlice>();
   const subscribers = new Set<ConversationRuntimeSubscriber>();
+  let cachedSnapshot: ConversationRuntimeSnapshot | undefined;
 
-  const snapshot = (): ConversationRuntimeSnapshot => ({
-    activeConversationId,
-    conversations: new Map(Array.from(conversations.entries()).map(([id, slice]) => [id, cloneSlice(slice)])),
-  });
+  const invalidateSnapshot = () => {
+    cachedSnapshot = undefined;
+  };
+
+  const snapshot = (): ConversationRuntimeSnapshot => {
+    if (cachedSnapshot) return cachedSnapshot;
+    cachedSnapshot = {
+      activeConversationId,
+      conversations: new Map(Array.from(conversations.entries()).map(([id, slice]) => [id, cloneSlice(slice)])),
+    };
+    return cachedSnapshot;
+  };
 
   const notify = () => {
     const current = snapshot();
@@ -103,21 +112,25 @@ export function createConversationRuntimeStore() {
         activityTarget: patch.activityTarget ? { ...patch.activityTarget } : existing.activityTarget,
         scrollState: patch.scrollState ? { ...patch.scrollState } : existing.scrollState,
       });
+      invalidateSnapshot();
       notify();
     },
     setActiveConversation(conversationId?: number) {
       activeConversationId = conversationId;
       if (conversationId !== undefined) ensureConversation(conversationId);
+      invalidateSnapshot();
       notify();
     },
     deleteConversation(conversationId: number) {
       conversations.delete(conversationId);
       if (activeConversationId === conversationId) activeConversationId = undefined;
+      invalidateSnapshot();
       notify();
     },
     clear() {
       conversations.clear();
       activeConversationId = undefined;
+      invalidateSnapshot();
       notify();
     },
   };

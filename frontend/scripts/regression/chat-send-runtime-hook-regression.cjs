@@ -269,6 +269,7 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
   assert.ok(patches.some((patch) => patch.messages?.some((message) => message.role === "user" && message.content === "hello world")));
   assert.ok(patches.some((patch) => patch.pendingOptimisticMessages?.some((message) => message.id === "502")));
   assert.deepEqual(patches.at(-1).pendingOptimisticMessages, []);
+  assert.equal(Object.prototype.hasOwnProperty.call(patches.at(-1), "messages"), false, "clearing pending optimistic assistants must not overwrite fresher streamed messages");
   assert.ok(events.some((e) => e[0] === "event" && e[1] === "conversation-updated"));
 }
 

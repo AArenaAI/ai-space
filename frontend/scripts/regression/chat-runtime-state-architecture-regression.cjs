@@ -33,6 +33,10 @@ const path = require('node:path');
   unsubscribe();
   store.patchConversation(101, { activityTarget: { messageId: 'm2', column: 'left' } });
   assert.equal(notificationCount, 3, 'unsubscribe should stop later notifications while earlier patch/setActive notify');
+  const stableSnapshot = store.getSnapshot();
+  assert.equal(store.getSnapshot(), stableSnapshot, 'getSnapshot should keep stable identity when the store has not changed');
+  store.patchConversation(101, { messages: [{ id: 'u1', role: 'user', content: 'hello again' }] });
+  assert.notEqual(store.getSnapshot(), stableSnapshot, 'mutating the store should invalidate snapshot identity for useSyncExternalStore');
 
   const aborted = [];
   const registry = createStreamOwnerRegistry({
@@ -220,6 +224,8 @@ const path = require('node:path');
   assert.ok(lifecycleSource.includes('chatRuntimeStore.patchConversation(conversationId'), 'load-more lifecycle should sync prepended messages into the runtime store');
   assert.ok(localActionsSource.includes('chatRuntimeStore.setActiveConversation(undefined)'), 'local clear action should clear active runtime conversation');
   assert.ok(useChatSource.includes('buildBootstrapTaskResumePlan'), 'top-level chat hook should still own bootstrap task resume orchestration');
+  assert.ok(useChatSource.includes('useConversationRuntimeMessages(currentConversation)'), 'top-level chat hook should read messages from the runtime store selector');
+  assert.ok(useChatSource.includes('chatRuntimeStore.patchConversation(currentConversation, { messages: resolved'), 'top-level setMessages adapter should write back into the runtime store');
   assert.ok(useChatSource.includes('chatRuntimeStore.patchConversation(task.conversation_id || conversationId'), 'bootstrap task resume should sync active metadata into the runtime store');
   assert.ok(useChatSource.includes('pendingOptimisticMessages: []'), 'top-level stop should clear pending optimistic runtime state');
 

@@ -54,6 +54,20 @@ test('completed messages with generationTaskId are idle when no active stream/po
   assert.equal(state.status, 'idle');
 });
 
+test('answered assistant with task anchor is idle after active runtime clears', () => {
+  const state = store.inferConversationGenerationState({
+    conversationId: 7,
+    messages: [{ id: 'a', role: 'assistant', content: 'OK 42', generationTaskId: 99 }],
+    hasActiveTaskStream: false,
+    hasCurrentPoller: false,
+    hasPendingLocalAssistant: false,
+    hasMainStream: false,
+    previous: { conversationId: 7, status: 'streaming', updatedAt: 1 },
+    now: 2,
+  });
+  assert.equal(state.status, 'idle');
+});
+
 test('server terminal status overrides stale running activity and task ids', () => {
   assert.equal(typeof store.inferConversationGenerationState, 'function');
   const state = store.inferConversationGenerationState({
