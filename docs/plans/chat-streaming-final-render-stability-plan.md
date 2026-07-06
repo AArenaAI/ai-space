@@ -1,4 +1,6 @@
-# Chat 正文流式输出完成态稳定方案
+# Chat 正文流式输出完成态稳定实施计划
+
+> **文档定位:** 这是实施计划，描述 completed 后可见正文稳定、canonical reconciliation 与富文本 hydration gate 的长期方案；路线图见 `docs/plans/chat-compare-ux-roadmap.md`，回测标准见 `docs/testing/chat-switch-resume-regression-standard.md`。
 
 ## 背景
 

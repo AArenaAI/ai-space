@@ -1,5 +1,7 @@
-# AI Space 聊天切换 / 上滑历史 / Markdown 渲染根治方案
+# AI Space 聊天切换 / 上滑历史 / Markdown 渲染根治实施计划
 
+> **文档定位:** 这是实施计划，聚焦消息窗口化与上滑历史根治；路线图见 `docs/plans/chat-compare-ux-roadmap.md`，回测标准见 `docs/testing/chat-switch-resume-regression-standard.md`。
+>
 > 目标：借鉴 Open WebUI 的“默认最近少量消息 + 上滑逐页释放/加载”优点，结合 AI Space 现有 React + Virtuoso + restore/cache 架构，根治切换会话、路由和上滑历史时的 Markdown 渐进渲染可感知、掉底、闪屏/跳动问题。
 >
 > 本文是实施计划，不是最终产品代码。所有阶段必须在 `testnet` 分支小范围提交，并用 fixture + 真实 profile 验证后推进。

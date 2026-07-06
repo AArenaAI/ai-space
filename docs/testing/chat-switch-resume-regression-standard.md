@@ -1,5 +1,7 @@
-# Chat 切屏 / 续流 / 完成态复测用例
+# Chat 切屏 / 续流 / 完成态回测标准
 
+> **文档定位:** 这是回测标准 / 测试用例清单，不是路线图或实施方案；路线图见 `docs/plans/chat-compare-ux-roadmap.md`，实施计划见 `docs/plans/*-plan.md`。
+>
 > 目的：后续排查 Chat 切出去再切回来、reasoning/正文续流、Stop/spinner/completed、重复 append 时，统一按本文件逐项复测，不再只看刷新后或后端 completed。
 
 ## 基本原则

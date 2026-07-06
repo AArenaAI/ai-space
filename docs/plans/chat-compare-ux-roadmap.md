@@ -2,6 +2,8 @@
 
 > **来源:** 2026-07-03 用户粘贴的 Chat/Compare 后续优化清单。
 > **目标:** 按“稳定感 → 可控感 → 阅读效率 → 长远架构”推进 Chat / Compare，不再零散修 bug。
+> **文档定位:** 本文件是路线图；回测标准放在 `docs/testing/`；具体实施方案放在 `docs/plans/*-plan.md`。
+> **最近更新:** 2026-07-06，根据 Chat pending / accepted send / Compare live / `test:chat-live-full` 验证结果刷新状态。
 > **状态口径:**
 > - ✅ 已完成：已有提交、回归或线上验证支撑。
 > - 🟡 部分完成：已有基础能力或局部修复，但还未达到目标体验。
@@ -16,6 +18,10 @@
 > - `2d6d58e fix(chat): group activity sources by domain`
 > - `ca08ca0 fix(chat): clarify expandable source groups`
 > - `eba377f fix(chat): clarify failed activity source state`
+> - `66aaa1a fix(chat): preserve composer state and simplify pending UI`
+> - `9f420c2 test(chat): update compare activity live regression`
+> - `5898260 test(chat): harden live regression auth and cleanup`
+> - `63b51a2 test(chat): add live smoke suite and cleanup helpers`
 
 ---
 
@@ -23,9 +29,9 @@
 
 | 优先级 | 主题 | 状态 | 说明 |
 |---|---|---:|---|
-| P1 | 发送后的稳定感 | 🟡 | 已补 live jitter/旧行稳定 probe；当前 3 轮 testnet 验证无旧行 remount/高度/文本变化；富文本完成态已统一到 stable token/block 渲染，常用 Markdown + 数学/脚注/Mermaid 已覆盖，当前重点转向“完成后二次刷新”与更强 stress probe。 |
-| P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化已静默 PATCH 当前会话，并有 testnet live 回归覆盖刷新与新一轮 payload。 |
-| P3 | 阅读效率 | 🟡 | Compare 双列与 Activity 来源已显著改善；长 Markdown 常用结构、数学、脚注、Mermaid 已覆盖；移动端/滚动定位/长消息操作栏仍需继续。 |
+| P1 | 发送后的稳定感 | ✅ | accepted-send contract、pending 单灰点、Stop/switch/reload、真实完整回复、真实 Compare、`test:chat-live-full` 均已通过；长期 identity/merge 问题归入 P5。 |
+| P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化、当前 DOM marker、真实 Compare 双列 Activity inline/split 均有 live 回归覆盖。 |
+| P3 | 阅读效率 | 🟡 | Activity/来源入口大部分完成；当前下一轮聚焦长消息阅读定位、block anchor、高亮、Compare 长回答操作栏。 |
 | P4 | 侧栏/历史体验 | 🟡 | “发送后会话移动到今天”等已修，hook 化未做。 |
 | P5 | 长期状态架构 | 🟡 | Markdown 渲染长期主干已落地为 `StableMarkdownRenderer`；ConversationRuntimeStore / stream ownership / merge 版本机制仍是长期工作。 |
 
@@ -76,26 +82,21 @@ npm run test:chat-placeholder-jitter-live
 
 ### 2. Pending / 思考占位高度稳定
 
-**状态:** 🟡 已有 probe 监控，暂未发现超阈值问题
+**状态:** ✅ 已收敛为普通 Chat / Compare 共用的轻量 pending shell，并通过 live 回归
 
 **附件目标:**
 
 > 点发送后，回答区域平滑出现，不“蹦一下”。
 
-**已知问题 / 当前验证:**
+**当前验证:**
 
-- placeholder 初始高度可能 `216 → 180`。
-- 空占位到 reasoning token 有时会跳。
-- 当前 testnet `chat-placeholder-jitter-live` 3 轮结果：placeholder → content 最大跳变 25px，低于 32px 阈值；latest assistant 最大高度变化 41px，属于内容自然增长，低于 96px 阈值。
+- `AssistantPendingShell` 已收敛为单个中性灰呼吸点：无 spinner、无“正在生成/思考中/后台保持进度”、无卡片/骨架。
+- 普通 Chat、Compare、Activity fixture 均覆盖 `data-chat-pending-dot-core="true"`。
+- `test:chat-live-full` 中 P1 state consistency live 验证 pending 高度稳定为 26px，`duplicateIds=[]`，Stop 后 pending/spinner 清零。
 
-**待做:**
+**长期项:**
 
-- 固定 assistant pending row 首帧高度。
-- `AssistantMessageMeta`、model/status slot 预留稳定高度。
-- reasoning 开始前后保持布局一致。
-- Compare 两列 pending 高度一致。
-
-> 这项先不做无证据重构；后续 probe 出现超阈值再引入统一 `AssistantPendingShell`。
+- 若后续 stress probe 再出现首 token 高度跳变，再补专门的 pending-height fixture；当前不再作为下一轮主任务。
 
 **补充优化项:**
 
@@ -115,7 +116,7 @@ npm run test:chat-placeholder-jitter-live
 
 ### 3. Stop / resume / route switch 的视觉一致性
 
-**状态:** 🟡 部分完成
+**状态:** ✅ P1 live 回归已覆盖真实发送、切会话、切回、Stop、reload 和 cleanup
 
 **附件目标:**
 
@@ -123,15 +124,13 @@ npm run test:chat-placeholder-jitter-live
 
 **已完成:**
 
-- stream ownership 已经比之前稳定。
-- 相关 live 脚本已有基础：active task resume、interrupt resume、stop button 多会话切换等。
+- `test:chat-p1-state-consistency-live` 已覆盖真实 UI 发送、早期采样、切到 B、切回 A、多阶段采样、Stop、reload。
+- `test:chat-live-full` 已串联 dynamic shell、真实完整 Chat、真实 Compare、P1 状态一致性，并默认清理临时会话。
+- 已验证：无重复 id、pending 高度稳定、Stop 后 stop button 清零、active tasks 为空、reload 后中断态稳定。
 
-**未完成:**
+**长期项:**
 
-- 发送中切会话再回来时的视觉一致性专项验证。
-- Stop 后状态是否稳定的 UX 级验证。
-- 后台任务恢复时是否重复显示 pending。
-- Compare 一列完成、一列还在跑时，按钮状态是否明确。
+- Compare 一列完成一列生成时的按钮文案仍可作为后续体验优化，但不阻塞当前 P1 验收。
 
 **补充优化项:**
 
@@ -613,7 +612,7 @@ conversationId -> activeStreams
 
 ### 第一轮：P3 Activity / 来源入口继续减噪
 
-**状态:** 🟡 当前优先执行
+**状态:** ✅ 已完成，不再作为下一轮主任务
 
 任务：
 
@@ -628,7 +627,7 @@ conversationId -> activeStreams
 
 ### 第二轮：P3 长消息性能和阅读定位
 
-**状态:** 🟡 当前优先执行
+**状态:** 🟡 下一轮优先执行
 
 任务：
 
@@ -662,33 +661,30 @@ conversationId -> activeStreams
 - 来源域名过多时，支持“显示全部 / 收起”。
 - 对文件来源、网页来源、工具来源统一视觉层级。
 
-### B. Chat Activity 总回归纳入 CI / 手工 checklist
+### B. Chat live 总回归纳入手工 checklist
 
-**状态:** 🟡 可选优化
+**状态:** ✅ 已形成标准命令
 
-当前已拆分：
-
-```bash
-npm run test:chat-activity-sources:fixture
-npm run test:chat-activity-sources:live
-npm run test:chat-activity-sources
-```
-
-普通本地开发跑 fixture；发布前再跑 live 聚合，避免每次开发都打真实模型。
-
-### C. WebUI / testnet 部署前检查固定化
-
-**状态:** 🟡 可选优化
-
-本轮多次验证了：
+当前可用：
 
 ```bash
-curl http://127.0.0.1:9091/health
-npm run build
-npm run test:chat-activity-sources
+npm run test:chat-live-smoke
+npm run test:chat-live-full
 ```
 
-建议写成轻量发布 checklist，避免以后漏检 testnet 后端是否脚本托管、是否 PPID=1。
+`test:chat-live-full` 覆盖 dynamic shell、真实完整 Chat、真实 Compare、P1 send/switch/stop/reload，并默认删除临时测试会话；需要保留现场时设置 `KEEP_LIVE_CONVERSATIONS=1`。
+
+### C. testnet 前端静态部署检查固定化
+
+**状态:** ✅ 已沉淀到记忆和 skill reference
+
+AI Space testnet 前端由 nginx 直接服务 `frontend/out`。前端-only 变更只需在干净目标代码上 `npm run build` 并同步/生成静态 `out`，不需要额外部署或重启后端。验证重点：
+
+```bash
+stat -c '%y %n' /workspace/aipool/frontend/out/chat/index.html
+curl -sS -I --max-time 10 https://testnet.ai-space.xyz/chat/ | sed -n '1,16p'
+npm run test:chat-live-full
+```
 
 ---
 
