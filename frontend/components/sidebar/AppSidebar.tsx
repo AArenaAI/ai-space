@@ -46,6 +46,7 @@ import { saveConversationScrollState } from "@/lib/chatConversationScrollState";
 import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
 import { apiFetch, apiJson } from "@/lib/api/client";
+import { logoutBrowserSession } from "@/lib/auth/state";
 import { readAuthState } from "@/lib/auth/state";
 
 
@@ -720,7 +721,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
   useEffect(() => { const h = () => { clearChatSidebarHistoryCache(`desktop:${currentWS?.id || "all"}`); loadConversations(); }; window.addEventListener("workspace-changed", h); window.addEventListener("user-login", h); window.addEventListener("user-logout", h); return () => { window.removeEventListener("workspace-changed", h); window.removeEventListener("user-login", h); window.removeEventListener("user-logout", h); }; }, [currentWS?.id, loadConversations]);
 
   /* 操作 */
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); clearChatSidebarHistoryCache(`desktop:${currentWS?.id || "all"}`); window.location.href = "/"; };
+  const handleLogout = async () => { await logoutBrowserSession(); setUser(null); setConversations([]); clearChatSidebarHistoryCache(`desktop:${currentWS?.id || "all"}`); window.location.href = "/"; };
   const handleNewChat = () => {
     const ts = Date.now();
     if (skillKey) {

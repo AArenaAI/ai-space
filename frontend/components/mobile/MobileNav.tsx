@@ -30,6 +30,7 @@ import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
 import { apiFetch, apiJson } from "@/lib/api/client";
+import { logoutBrowserSession } from "@/lib/auth/state";
 
 const navItems = [
   { icon: MessageSquare, label: "聊天", href: "/chat" },
@@ -232,7 +233,7 @@ export default function MobileNav() {
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
 
-  const handleLogout = () => { localStorage.removeItem("token"); localStorage.removeItem("user"); import("@/lib/guestId").then(({ getGuestId }) => getGuestId()); setUser(null); setConversations([]); clearChatSidebarHistoryCache("mobile"); setMenuOpen(false); router.push("/"); };
+  const handleLogout = async () => { await logoutBrowserSession(); setUser(null); setConversations([]); clearChatSidebarHistoryCache("mobile"); setMenuOpen(false); router.push("/"); };
   const handleNewChat = () => { router.push(`/chat?t=${Date.now()}`); setMenuOpen(false); };
   const handleOpenConversation = useCallback((conv: Conversation) => {
     setCurrentConvId(String(conv.id));

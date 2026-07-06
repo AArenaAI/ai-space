@@ -16,6 +16,7 @@ import type {
   AdminUser,
   AdminUsersResponse,
 } from "./types";
+import { readAuthState } from "@/lib/auth/state";
 
 export class AdminApiError extends Error {
   status: number;
@@ -42,7 +43,10 @@ const ADMIN_TOKEN_KEY = "admin_token";
 const ADMIN_USER_KEY = "admin_user";
 
 export function getStoredAdminToken() {
-  return typeof window !== "undefined" ? localStorage.getItem(ADMIN_TOKEN_KEY) : null;
+  if (typeof window === "undefined") return null;
+  const authState = readAuthState();
+  if (authState.isAdmin && authState.token) return authState.token;
+  return localStorage.getItem(ADMIN_TOKEN_KEY);
 }
 
 export function storeAdminSession(token: string, user: AdminUser) {

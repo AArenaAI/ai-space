@@ -162,22 +162,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Session(c *gin.Context) {
-	cookie, err := c.Request.Cookie(refreshTokenCookieName)
-	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+	if len(refreshTokenCookieValues(c.Request)) == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_required"})
 		return
 	}
 
 	now := time.Now()
-	var stored models.RefreshToken
-	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil {
+	_, stored, ok := findUsableRefreshToken(h.db, c.Request, now)
+	if !ok {
 		h.clearRefreshTokenCookie(c)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_invalid"})
-		return
-	}
-	if !isRefreshTokenUsable(stored, now) {
-		h.clearRefreshTokenCookie(c)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "session_expired"})
 		return
 	}
 
@@ -200,20 +194,15 @@ func (h *AuthHandler) Session(c *gin.Context) {
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {
-	cookie, err := c.Request.Cookie(refreshTokenCookieName)
-	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+	if len(refreshTokenCookieValues(c.Request)) == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_required"})
 		return
 	}
 
 	now := time.Now()
-	var stored models.RefreshToken
-	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil {
+	_, stored, ok := findUsableRefreshToken(h.db, c.Request, now)
+	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_invalid"})
-		return
-	}
-	if !isRefreshTokenUsable(stored, now) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh_token_expired"})
 		return
 	}
 
@@ -245,10 +234,10 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	if cookie, err := c.Request.Cookie(refreshTokenCookieName); err == nil && strings.TrimSpace(cookie.Value) != "" {
-		now := time.Now()
+	now := time.Now()
+	for _, value := range refreshTokenCookieValues(c.Request) {
 		h.db.Model(&models.RefreshToken{}).
-			Where("token_hash = ? AND revoked_at IS NULL", hashRefreshToken(cookie.Value)).
+			Where("token_hash = ? AND revoked_at IS NULL", hashRefreshToken(value)).
 			Update("revoked_at", now)
 	}
 	h.clearRefreshTokenCookie(c)

@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	refreshTokenCookieName = "ai_space_refresh_token"
-	refreshTokenTTL        = 30 * 24 * time.Hour
+	refreshTokenCookieName       = "ai_space_session"
+	legacyRefreshTokenCookieName = "ai_space_refresh_token"
+	refreshTokenTTL              = 30 * 24 * time.Hour
 )
 
 func generateAccessToken(userID uint, email string, secret string) (string, error) {
@@ -40,8 +41,39 @@ func hashRefreshToken(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func refreshTokenCookieValues(r *http.Request) []string {
+	if r == nil {
+		return nil
+	}
+	values := make([]string, 0, 3)
+	for _, cookie := range r.Cookies() {
+		if cookie.Name != refreshTokenCookieName && cookie.Name != legacyRefreshTokenCookieName {
+			continue
+		}
+		value := strings.TrimSpace(cookie.Value)
+		if value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+	return values
+}
+
 func isRefreshTokenUsable(token models.RefreshToken, now time.Time) bool {
 	return token.RevokedAt == nil && token.ExpiresAt.After(now)
+}
+
+func findUsableRefreshToken(db *gorm.DB, r *http.Request, now time.Time) (string, models.RefreshToken, bool) {
+	for _, value := range refreshTokenCookieValues(r) {
+		var stored models.RefreshToken
+		if err := db.Where("token_hash = ?", hashRefreshToken(value)).First(&stored).Error; err != nil {
+			continue
+		}
+		if isRefreshTokenUsable(stored, now) {
+			return value, stored, true
+		}
+	}
+	return "", models.RefreshToken{}, false
 }
 
 func isRequestHTTPS(c *gin.Context) bool {
@@ -52,49 +84,41 @@ func isRequestHTTPS(c *gin.Context) bool {
 	return proto == "https"
 }
 
-func (h *AuthHandler) setRefreshTokenCookie(c *gin.Context, token string, expiresAt time.Time) {
-	maxAge := int(time.Until(expiresAt).Seconds())
-	if maxAge < 0 {
-		maxAge = 0
-	}
-	secure := isRequestHTTPS(c)
+func setCookie(c *gin.Context, name string, value string, path string, maxAge int, expires time.Time, secure bool) {
 	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     refreshTokenCookieName,
-		Value:    token,
-		Path:     "/",
+		Name:     name,
+		Value:    value,
+		Path:     path,
 		MaxAge:   maxAge,
-		Expires:  expiresAt,
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-	})
-	// Remove legacy /api-scoped refresh cookies so dynamic HTML shell requests can
-	// rely on a single site-wide cookie.
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     refreshTokenCookieName,
-		Value:    "",
-		Path:     "/api",
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
+		Expires:  expires,
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
+func (h *AuthHandler) clearLegacyRefreshTokenCookies(c *gin.Context) {
+	secure := isRequestHTTPS(c)
+	for _, path := range []string{"/", "/api"} {
+		setCookie(c, legacyRefreshTokenCookieName, "", path, -1, time.Unix(0, 0), secure)
+	}
+}
+
+func (h *AuthHandler) setRefreshTokenCookie(c *gin.Context, token string, expiresAt time.Time) {
+	maxAge := int(time.Until(expiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	secure := isRequestHTTPS(c)
+	setCookie(c, refreshTokenCookieName, token, "/", maxAge, expiresAt, secure)
+	h.clearLegacyRefreshTokenCookies(c)
+}
+
 func (h *AuthHandler) clearRefreshTokenCookie(c *gin.Context) {
 	secure := isRequestHTTPS(c)
 	for _, path := range []string{"/", "/api"} {
-		http.SetCookie(c.Writer, &http.Cookie{
-			Name:     refreshTokenCookieName,
-			Value:    "",
-			Path:     path,
-			MaxAge:   -1,
-			Expires:  time.Unix(0, 0),
-			HttpOnly: true,
-			Secure:   secure,
-			SameSite: http.SameSiteLaxMode,
-		})
+		setCookie(c, refreshTokenCookieName, "", path, -1, time.Unix(0, 0), secure)
+		setCookie(c, legacyRefreshTokenCookieName, "", path, -1, time.Unix(0, 0), secure)
 	}
 }
 

@@ -23,39 +23,46 @@ func TestRefreshCookieSettingsUseHttpOnlySecureSameSiteLax(t *testing.T) {
 	h.setRefreshTokenCookie(c, "refresh-token-value", time.Now().Add(30*24*time.Hour))
 
 	cookies := w.Result().Cookies()
-	if len(cookies) != 2 {
-		t.Fatalf("expected site cookie plus legacy cleanup cookie, got %d", len(cookies))
+	if len(cookies) != 3 {
+		t.Fatalf("expected new session cookie plus legacy cleanup cookies, got %d: %+v", len(cookies), cookies)
 	}
-	var cookie *http.Cookie
-	var legacyCleanup *http.Cookie
+	var sessionCookie *http.Cookie
+	legacyCleanupPaths := map[string]bool{"/": false, "/api": false}
 	for _, item := range cookies {
-		if item.Name != refreshTokenCookieName {
-			t.Fatalf("expected cookie %q, got %q", refreshTokenCookieName, item.Name)
+		switch item.Name {
+		case refreshTokenCookieName:
+			if item.Path != "/" {
+				t.Fatalf("session cookie path = %q, want /", item.Path)
+			}
+			sessionCookie = item
+		case legacyRefreshTokenCookieName:
+			if _, ok := legacyCleanupPaths[item.Path]; !ok {
+				t.Fatalf("unexpected legacy cleanup path %q", item.Path)
+			}
+			if item.MaxAge != -1 {
+				t.Fatalf("legacy cleanup cookie MaxAge = %d, want -1", item.MaxAge)
+			}
+			legacyCleanupPaths[item.Path] = true
+		default:
+			t.Fatalf("unexpected cookie %q", item.Name)
 		}
-		switch item.Path {
-		case "/":
-			cookie = item
-		case "/api":
-			legacyCleanup = item
+	}
+	if sessionCookie == nil {
+		t.Fatalf("missing site-wide session cookie")
+	}
+	for path, seen := range legacyCleanupPaths {
+		if !seen {
+			t.Fatalf("missing legacy cleanup cookie for path %s", path)
 		}
 	}
-	if cookie == nil {
-		t.Fatalf("missing site-wide refresh cookie")
-	}
-	if legacyCleanup == nil || legacyCleanup.MaxAge != -1 {
-		t.Fatalf("missing legacy /api cleanup cookie: %+v", legacyCleanup)
-	}
-	if !cookie.HttpOnly {
+	if !sessionCookie.HttpOnly {
 		t.Fatalf("refresh cookie must be HttpOnly")
 	}
-	if !cookie.Secure {
+	if !sessionCookie.Secure {
 		t.Fatalf("refresh cookie must be Secure behind https")
 	}
-	if cookie.SameSite != http.SameSiteLaxMode {
-		t.Fatalf("refresh cookie SameSite = %v, want Lax", cookie.SameSite)
-	}
-	if cookie.Path != "/" {
-		t.Fatalf("refresh cookie path = %q, want /", cookie.Path)
+	if sessionCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("refresh cookie SameSite = %v, want Lax", sessionCookie.SameSite)
 	}
 }
 

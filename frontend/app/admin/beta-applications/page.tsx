@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CheckCircle, XCircle, Loader2, Search, Filter, ChevronDown, Mail, User, Briefcase, FileText, Clock, Award, AlertTriangle, Bug, MessageSquare, ThumbsUp, ThumbsDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { adminFetch } from "@/lib/admin/api";
 
 interface BetaApplication {
   id: number;
@@ -77,23 +78,12 @@ export default function BetaApplicationsPage() {
   const [bcStats, setBcStats] = useState({ total: 0, pending: 0, reviewed: 0 });
 
   const fetchApplications = useCallback(async () => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      setApplications([]);
-      setAppStats({ total: 0, pending: 0, approved: 0, rejected: 0 });
-      setAppLoading(false);
-      return;
-    }
     setAppLoading(true);
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.append("status", statusFilter);
       if (industryFilter) params.append("industry", industryFilter);
-      const res = await fetch(`/api/admin/beta-applications?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("获取失败");
-      const data = await res.json();
+      const data = await adminFetch<{ items?: BetaApplication[]; total?: number }>(`/beta-applications?${params}`);
       setApplications(data.items || []);
       setAppStats({
         total: data.total || 0,
@@ -109,22 +99,11 @@ export default function BetaApplicationsPage() {
   }, [statusFilter, industryFilter]);
 
   const fetchBadCases = useCallback(async () => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      setBadCases([]);
-      setBcStats({ total: 0, pending: 0, reviewed: 0 });
-      setBcLoading(false);
-      return;
-    }
     setBcLoading(true);
     try {
       const params = new URLSearchParams();
       if (bcStatusFilter) params.append("status", bcStatusFilter);
-      const res = await fetch(`/api/admin/bad-cases?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("获取失败");
-      const data = await res.json();
+      const data = await adminFetch<{ items?: BadCase[]; total?: number }>(`/bad-cases?${params}`);
       setBadCases(data.items || []);
       setBcStats({
         total: data.total || 0,
@@ -147,26 +126,16 @@ export default function BetaApplicationsPage() {
   }, [fetchBadCases]);
 
   const handleReview = async (id: number, status: "approved" | "rejected") => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      alert("请先登录后台");
-      return;
-    }
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/admin/beta-applications/${id}/review`, {
+      await adminFetch(`/beta-applications/${id}/review`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           status,
           review_note: reviewNote,
           invite_code: status === "approved" ? inviteCode : undefined,
         }),
       });
-      if (!res.ok) throw new Error("审核失败");
       setReviewingId(null);
       setReviewNote("");
       setInviteCode("");
@@ -179,27 +148,17 @@ export default function BetaApplicationsPage() {
   };
 
   const handleBadCaseReview = async (id: number) => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      alert("请先登录后台");
-      return;
-    }
     setActionLoading(true);
     try {
       const credits = parseInt(grantedCredits) || 0;
-      const res = await fetch(`/api/admin/bad-cases/${id}/review`, {
+      await adminFetch(`/bad-cases/${id}/review`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
         body: JSON.stringify({
           status: "reviewed",
           review_note: bcReviewNote,
           granted_credits: credits,
         }),
       });
-      if (!res.ok) throw new Error("审核失败");
       setReviewingBadCase(null);
       setBcReviewNote("");
       setGrantedCredits("");

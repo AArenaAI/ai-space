@@ -32,6 +32,7 @@ import ManjuNodePanel from "./ManjuNodePanel";
 import ManjuProjectIO from "./ManjuProjectIO";
 import type { WorkflowMode } from "./types";
 import { toast } from "sonner";
+import { logoutBrowserSession } from "@/lib/auth/state";
 
 export interface ManjuStudioLayoutProps {
   projectName: string;
@@ -939,16 +940,14 @@ export default function ManjuStudioLayout({
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           setSettingsOpen(false);
                           if (!studioUser) {
                             router.push("/login?returnUrl=/ai-comic");
                             return;
                           }
-                          localStorage.removeItem("token");
-                          localStorage.removeItem("user");
+                          await logoutBrowserSession();
                           localStorage.removeItem("current-workspace");
-                          window.dispatchEvent(new Event("auth-changed"));
                           router.push("/");
                         }}
                         className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-[12px] font-semibold text-black shadow-sm transition hover:bg-black hover:text-white"

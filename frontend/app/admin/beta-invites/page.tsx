@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Copy, Plus, Loader2, Search, RefreshCw, CheckCircle, XCircle, Clock, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { adminFetch } from "@/lib/admin/api";
 
 interface BetaInvite {
   id: number;
@@ -50,22 +51,12 @@ export default function BetaInvitesPage() {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const fetchInvites = useCallback(async () => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      setInvites([]);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (batchFilter) params.append("batch", batchFilter);
       if (statusFilter) params.append("status", statusFilter);
-      const res = await fetch(`/api/admin/beta-invites?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("获取失败");
-      const data = await res.json();
+      const data = await adminFetch<{ items?: BetaInvite[] }>(`/beta-invites?${params}`);
       setInvites(data.items || []);
     } catch {
       setInvites([]);
@@ -79,23 +70,9 @@ export default function BetaInvitesPage() {
   }, [fetchInvites]);
 
   const handleGenerate = async () => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      alert("请先登录后台");
-      return;
-    }
     setGenerating(true);
     try {
-      const res = await fetch("/api/admin/beta-invites/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(generateForm),
-      });
-      if (!res.ok) throw new Error("生成失败");
-      const data = await res.json();
+      const data = await adminFetch<{ count: number }>("/beta-invites/generate", { method: "POST", body: JSON.stringify(generateForm) });
       alert(`成功生成 ${data.count} 个邀请码`);
       setGenerateOpen(false);
       fetchInvites();

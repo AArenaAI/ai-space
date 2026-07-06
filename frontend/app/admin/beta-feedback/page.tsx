@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Clock, Filter, Lightbulb, Loader2, Mail, MessageSquare, Search, Sparkles, User } from "lucide-react";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { cn } from "@/lib/utils";
+import { adminFetch } from "@/lib/admin/api";
 
 interface BetaFeedback {
   id: number;
@@ -49,13 +50,6 @@ export default function BetaFeedbackAdminPage() {
   const [total, setTotal] = useState(0);
 
   const fetchFeedback = useCallback(async () => {
-    const token = localStorage.getItem("admin_token");
-    if (!token) {
-      setItems([]);
-      setTotal(0);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -63,11 +57,7 @@ export default function BetaFeedbackAdminPage() {
       if (category) params.set("category", category);
       if (status) params.set("status", status);
       params.set("page_size", "100");
-      const res = await fetch(`/api/admin/beta-feedback?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("获取失败");
-      const data = await res.json();
+      const data = await adminFetch<{ items?: BetaFeedback[]; total?: number }>(`/beta-feedback?${params}`);
       setItems(data.items || []);
       setTotal(data.total || 0);
     } catch {
