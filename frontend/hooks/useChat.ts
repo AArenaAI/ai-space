@@ -44,6 +44,7 @@ import {
   type ConversationGenerationStore,
 } from "@/lib/chatConversationGenerationStore";
 import { readAuthState } from "@/lib/auth/state";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 const API_BASE_URL = ""; // 使用相对路径，nginx 同域名代理 /api -> 后端
 
@@ -313,24 +314,52 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       const resumeKey = `${message.id}:${task.id}:${after || 0}`;
       if (taskStreamsRef.current[message.id] || activeTaskStreamsRef.current[message.id] || resumedBootstrapTaskKeysRef.current.has(resumeKey)) return;
       resumedBootstrapTaskKeysRef.current.add(resumeKey);
-      setMessages((prev) => prev.map((item) => {
-        if (item.id !== message.id) return item;
-        const nextLastSequence = after || item.lastSequence;
-        if (
-          item.generationTaskId === task.id &&
-          item.lastSequence === nextLastSequence &&
-          item.activityStatus
-        ) {
-          return item;
-        }
-        return {
-          ...item,
-          generationTaskId: task.id,
-          lastSequence: nextLastSequence,
-          activityStatus: item.activityStatus ?? busyStatus,
-          generationStartedAt: item.generationStartedAt ?? Date.now(),
-        };
-      }));
+      setMessages((prev) => {
+        const next = prev.map((item) => {
+          if (item.id !== message.id) return item;
+          const nextLastSequence = after || item.lastSequence;
+          if (
+            item.generationTaskId === task.id &&
+            item.lastSequence === nextLastSequence &&
+            item.activityStatus
+          ) {
+            return item;
+          }
+          return {
+            ...item,
+            generationTaskId: task.id,
+            lastSequence: nextLastSequence,
+            activityStatus: item.activityStatus ?? busyStatus,
+            generationStartedAt: item.generationStartedAt ?? Date.now(),
+          };
+        });
+        chatRuntimeStore.patchConversation(task.conversation_id || conversationId, {
+          messages: next,
+          activeStreams: {
+            ...chatRuntimeStore.getConversation(task.conversation_id || conversationId).activeStreams,
+            [message.id]: {
+              convId: task.conversation_id || conversationId,
+              serverMessageId: task.assistant_message_id,
+              generationTaskId: task.id,
+              lastSequence: after || 0,
+              content: initialContent || "",
+            },
+          },
+          generationTasks: {
+            ...chatRuntimeStore.getConversation(task.conversation_id || conversationId).generationTasks,
+            [String(task.id)]: {
+              convId: task.conversation_id || conversationId,
+              serverMessageId: task.assistant_message_id,
+              generationTaskId: task.id,
+              localMessageId: message.id,
+              lastSequence: after || 0,
+              content: initialContent || "",
+            },
+          },
+          updatedAt: Date.now(),
+        });
+        return next;
+      });
       startTaskEventStream(
         task.conversation_id || conversationId,
         message.id,
@@ -442,9 +471,19 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
       .map(([id]) => id);
     if (pendingIds.length === 0) return;
     const stoppedPatch = buildStoppedPatch(Date.now());
-    setMessages((prev) => prev.map((message) =>
-      pendingIds.includes(message.id) ? { ...message, ...stoppedPatch } : message
-    ));
+    setMessages((prev) => {
+      const next = prev.map((message) =>
+        pendingIds.includes(message.id) ? { ...message, ...stoppedPatch } : message
+      );
+      chatRuntimeStore.patchConversation(currentConversation, {
+        messages: next,
+        pendingOptimisticMessages: [],
+        activeStreams: {},
+        generationTasks: {},
+        updatedAt: Date.now(),
+      });
+      return next;
+    });
     pendingIds.forEach((id) => {
       delete pendingLocalAssistantsRef.current[id];
     });

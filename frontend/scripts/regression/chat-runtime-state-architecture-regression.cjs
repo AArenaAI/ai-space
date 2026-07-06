@@ -204,6 +204,7 @@ const path = require('node:path');
   const generationControlsSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatGenerationControlsRuntime.ts'), 'utf8');
   const lifecycleSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatConversationLifecycle.ts'), 'utf8');
   const localActionsSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatLocalActions.ts'), 'utf8');
+  const useChatSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChat.ts'), 'utf8');
   assert.ok(createRuntimeSource.includes('chatRuntimeStore'), 'conversation create runtime should seed the shared runtime store');
   assert.ok(createRuntimeSource.includes('setActiveConversation(data.id)'), 'created conversations should become the explicit active runtime conversation');
   assert.ok(createRuntimeSource.includes('deleteConversation(tempConversationId)'), 'failed/replaced temp conversations should be removed from the runtime store');
@@ -218,6 +219,9 @@ const path = require('node:path');
   assert.ok(lifecycleSource.includes('chatRuntimeStore.setActiveConversation'), 'conversation lifecycle should keep active runtime conversation in sync');
   assert.ok(lifecycleSource.includes('chatRuntimeStore.patchConversation(conversationId'), 'load-more lifecycle should sync prepended messages into the runtime store');
   assert.ok(localActionsSource.includes('chatRuntimeStore.setActiveConversation(undefined)'), 'local clear action should clear active runtime conversation');
+  assert.ok(useChatSource.includes('buildBootstrapTaskResumePlan'), 'top-level chat hook should still own bootstrap task resume orchestration');
+  assert.ok(useChatSource.includes('chatRuntimeStore.patchConversation(task.conversation_id || conversationId'), 'bootstrap task resume should sync active metadata into the runtime store');
+  assert.ok(useChatSource.includes('pendingOptimisticMessages: []'), 'top-level stop should clear pending optimistic runtime state');
 
   console.log(JSON.stringify({ ok: true, notifications: notificationCount, aborted: aborted.length }, null, 2));
 })().catch((error) => {

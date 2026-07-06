@@ -36,7 +36,7 @@
 | P2 | 模型选择与 Compare 可控感 | ✅ | Compare 模型持久化、当前 DOM marker、真实 Compare 双列 Activity inline/split 均有 live 回归覆盖。 |
 | P3 | 阅读效率 | ✅/🟡 | 桌面 Chat/Compare 阅读定位主线已完成：message 精确回跳、block-level jump、高亮、code/table block-local 回归、Compare 长回答 action 可达；移动端 Compare 与收藏片段仍后置。 |
 | P4 | 侧栏/历史体验 | ✅ | `useChatSidebarHistory` 已抽出并补齐 optimistic pipeline：新会话 temp→canonical 原地替换、标题弱 pending、active 高亮连续、rename/delete/pin 统一更新、load-more 锚点保护与 fixture 覆盖。 |
-| P5 | 长期状态架构 | 🟡 | 第一包已落地：ConversationRuntimeStore / StreamOwnerRegistry / mergeConversationSnapshot 核心模块与回归已建立，并低风险接入新会话创建 adapter；restore/bootstrap/stream 全量迁移仍是后续工作。 |
+| P5 | 长期状态架构 | ✅/🟡 | Runtime 基础与 adapter 写入主线已完成：ConversationRuntimeStore、StreamOwnerRegistry、mergeConversationSnapshot、create/restore/send/main/task/poll/generation controls/lifecycle/local actions/top-level resume-stop 均已同步 runtime store，并有 architecture/runtime/live 回归；后续只剩更大范围的 UI 读路径订阅 store（不再属于 adapter 收口）。 |
 
 ---
 
@@ -523,7 +523,7 @@ const {
 
 ### 12. Chat runtime state 收成单一 store
 
-**状态:** 🟡 第一包已完成，后续逐步迁移 useChat 状态
+**状态:** ✅/🟡 adapter 写入主线已完成，后续只剩 UI 读路径订阅 store
 
 **附件目标:**
 
@@ -560,11 +560,20 @@ ConversationRuntimeStore
 - `useChatConversationCreateRuntime` 已低风险接入：创建请求发出前写入 temp runtime conversation，服务端 id 返回后删除 temp 并设置 canonical active conversation；失败时清理 temp。
 - 新增 `npm run test:chat-runtime-state-architecture` 并纳入 `test:chat-runtime`。
 
+**已完成 adapter 收口:**
+
+- `useChatConversationRestoreRuntime`：memory cache、persistent cache、backend restore/bootstrap 应用后同步 `messages`、`compareModels`、`updatedAt`，并从 active task/pending refs 同步 `activeStreams`、`generationTasks`、`pendingOptimisticMessages`。
+- `useChatTaskStreamRuntime` / `useChatMainStreamRuntime` / `useChatBackgroundPollingRuntime`：stream start、active state、message patch、fallback polling、finished/cleanup 都同步 runtime store，且清理只清当前 conversation 的 active metadata。
+- `useChatSingleSendRuntime` / `useChatCompareSendRuntime`：发送前 optimistic messages、server-bound assistant、recoverable/error/abort patch、pending optimistic clear、compareModels 均写入 runtime store。
+- `useChatGenerationControlsRuntime`：Stop 清 runtime active metadata；Fork/refresh/streaming fork 的 compare messages 与 compareModels 同步 runtime store。
+- `useChatConversationLifecycle` / `useChatLocalActions` / top-level `useChat`：active conversation、load-more prepend、clear messages、bootstrap task resume、stop pending local assistants 均同步 runtime store。
+- `chat-runtime-state-architecture-regression` 已覆盖 create→send optimistic→main/task/poll→restore/cache 的同一 slice 演进，并用源码锚点锁住各 adapter helper，避免后续重构误删 bridge。
+
 ---
 
 ### 13. Stream ownership 正式化
 
-**状态:** 🟡 第五包已完成 Compare column owner key 精细化，后续只剩更广 cache 写入路径覆盖
+**状态:** ✅ owner/finalizer 主线已完成；更广 cache/runtime 写入路径已在 P5 adapter 收口中覆盖
 
 **已完成:**
 
@@ -623,15 +632,15 @@ conversationId -> activeStreams
 
 ### 14. Restore / bootstrap 版本机制更硬
 
-**状态:** 🟡 第二包已完成 restore/bootstrap 接入第一步，后续继续迁移更多调用点
+**状态:** ✅ restore/bootstrap/cache merge 与 runtime adapter 主线已完成
 
 **已完成:**
 
 - 已有 snapshot_version、updatedAt 等概念。
 
-**未完成:**
+**已完成规则:**
 
-统一比较规则：
+统一比较规则已由 `mergeConversationSnapshot` / restore merge decision / runtime adapter regression 覆盖：
 
 - local optimistic > bootstrap stale
 - active stream > restore snapshot
