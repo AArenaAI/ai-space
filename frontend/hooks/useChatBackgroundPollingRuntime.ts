@@ -15,11 +15,40 @@ import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import { createBusyGeneratingStatus } from "@/lib/chatActivityStatus";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import { readAuthState } from "@/lib/auth/state";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 type TaskStreamsRef = MutableRefObject<Record<string, AbortController>>;
 type BackgroundPollersRef = MutableRefObject<Record<string, number>>;
 
 type RealtimeSnapshot = { content?: string; generationStartedAt?: number; statusTimeline?: Message["statusTimeline"] } | undefined;
+
+function syncBackgroundPollingToRuntime({
+  conversationId,
+  localMessageId,
+  serverMessageId,
+  messages,
+  active,
+}: {
+  conversationId: number;
+  localMessageId: string;
+  serverMessageId: number;
+  messages?: Message[];
+  active: boolean;
+}) {
+  const current = chatRuntimeStore.getConversation(conversationId);
+  const activeStreams = { ...current.activeStreams };
+  if (active) {
+    activeStreams[localMessageId] = { convId: conversationId, serverMessageId, polling: true };
+  } else {
+    delete activeStreams[localMessageId];
+  }
+  chatRuntimeStore.patchConversation(conversationId, {
+    ...(messages ? { messages } : {}),
+    activeStreams,
+    generationTasks: current.generationTasks,
+    updatedAt: Date.now(),
+  });
+}
 
 type StartBackgroundPollingRunner = typeof startBackgroundPollingRunner;
 
@@ -71,6 +100,7 @@ export function createStartBackgroundPollingAction(input: CreateStartBackgroundP
 
   return (convId: number | undefined, localMessageId: string, serverMessageId?: number) => {
     if (!convId || !serverMessageId || input.backgroundPollersRef.current[localMessageId]) return;
+    syncBackgroundPollingToRuntime({ conversationId: convId, localMessageId, serverMessageId, active: true });
 
     const token = getToken();
     const headers: Record<string, string> = {};
@@ -91,30 +121,35 @@ export function createStartBackgroundPollingAction(input: CreateStartBackgroundP
           const realtime = realtimeGet(localMessageId);
           const liveContent = realtime?.content || "";
           const currentTime = now();
-          input.setMessages((prev) => prev.map((message) => {
-            const matchesLocalId = message.id === localMessageId;
-            const matchesServerId = Boolean(serverMessageId && message.serverMessageId === serverMessageId);
-            if (!matchesLocalId && !matchesServerId) return message;
-            return {
-              ...message,
-              ...buildBackgroundPollingMessagePatch({
-                existingContent: message.content,
-                polledContent: pollState.content,
-                polledReasoningContent: pollState.reasoningContent,
-                liveContent,
-                generationStartedAt: realtime?.generationStartedAt ?? message.generationStartedAt,
-                statusTimeline: realtime?.statusTimeline ?? message.statusTimeline,
-                streamActive,
-                serverMessageId,
-                isFinished: pollState.isFinished,
-                status: pollState.status,
-                now: currentTime,
-                createBusyStatus: () => createBusyGeneratingStatus(translate),
-              }),
-            };
-          }));
+          input.setMessages((prev) => {
+            const next = prev.map((message) => {
+              const matchesLocalId = message.id === localMessageId;
+              const matchesServerId = Boolean(serverMessageId && message.serverMessageId === serverMessageId);
+              if (!matchesLocalId && !matchesServerId) return message;
+              return {
+                ...message,
+                ...buildBackgroundPollingMessagePatch({
+                  existingContent: message.content,
+                  polledContent: pollState.content,
+                  polledReasoningContent: pollState.reasoningContent,
+                  liveContent,
+                  generationStartedAt: realtime?.generationStartedAt ?? message.generationStartedAt,
+                  statusTimeline: realtime?.statusTimeline ?? message.statusTimeline,
+                  streamActive,
+                  serverMessageId,
+                  isFinished: pollState.isFinished,
+                  status: pollState.status,
+                  now: currentTime,
+                  createBusyStatus: () => createBusyGeneratingStatus(translate),
+                }),
+              };
+            });
+            syncBackgroundPollingToRuntime({ conversationId: convId, localMessageId, serverMessageId, messages: next, active: !pollState.isFinished });
+            return next;
+          });
         },
         onFinished: (pollState) => {
+          syncBackgroundPollingToRuntime({ conversationId: convId, localMessageId, serverMessageId, active: false });
           input.stopBackgroundPoller(localMessageId);
           input.stopTaskStream(localMessageId);
           const selectedModel = input.getSelectedModel();

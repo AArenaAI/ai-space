@@ -20,6 +20,9 @@ source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/l
 source = source.replace(/import \{ emitTaskFinished as defaultEmitTaskFinished \} from "@\/lib\/taskNotifications";\n/g, "const defaultEmitTaskFinished = () => {};\n");
 source = source.replace(/import \{ realtimeGet as defaultRealtimeGet \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeGet = () => undefined;\n");
 source = source.replace(/import \{ readAuthState \} from "@\/lib\/auth\/state";\n/g, "const readAuthState = () => ({ token: null });\n");
+const runtimeStoreCalls = [];
+const runtimeStoreState = new Map();
+source = source.replace(/import \{ chatRuntimeStore \} from "@\/lib\/chatRuntime";\n/g, "const chatRuntimeStore = { getConversation(id) { return globalThis.__runtimeStoreState.get(id) || { activeStreams: {}, generationTasks: {} }; }, patchConversation(id, patch) { const existing = this.getConversation(id); const next = { ...existing, ...patch, activeStreams: patch.activeStreams || existing.activeStreams, generationTasks: patch.generationTasks || existing.generationTasks }; globalThis.__runtimeStoreState.set(id, next); globalThis.__runtimeStoreCalls.push([id, patch]); } };\n");
 source = source.replace(
   /import \{ getNotificationConversationTitle \} from "@\/lib\/chatBackgroundTaskRegistration";\n/g,
   fs.readFileSync(registrationFile, "utf8").replace(/export /g, "") + "\n"
@@ -44,6 +47,8 @@ const compiled = ts.transpileModule(source, {
   fileName: sourceFile,
 });
 fs.writeFileSync(outFile, compiled.outputText);
+globalThis.__runtimeStoreCalls = runtimeStoreCalls;
+globalThis.__runtimeStoreState = runtimeStoreState;
 
 const {
   createStopBackgroundPollerAction,
@@ -63,6 +68,13 @@ function createState(initial) {
       value = typeof next === "function" ? next(value) : next;
     },
   };
+}
+function resetRuntimeStore() {
+  runtimeStoreCalls.length = 0;
+  runtimeStoreState.clear();
+}
+function patchesForConversation(conversationId) {
+  return runtimeStoreCalls.filter((entry) => entry[0] === conversationId).map((entry) => entry[1]);
 }
 
 test("createStopBackgroundPollerAction clears timer and removes ref", () => {
@@ -98,6 +110,7 @@ test("createStartBackgroundPollingAction guards missing ids and duplicate poller
 });
 
 test("createStartBackgroundPollingAction starts runner with auth header and stores timer", () => {
+  resetRuntimeStore();
   const ref = { current: {} };
   const runnerCalls = [];
   const action = createStartBackgroundPollingAction({
@@ -120,9 +133,11 @@ test("createStartBackgroundPollingAction starts runner with auth header and stor
   assert.equal(ref.current.local, 77);
   assert.equal(runnerCalls[0].apiBaseUrl, "/api");
   assert.equal(runnerCalls[0].headers.Authorization, "Bearer tok");
+  assert.equal(patchesForConversation(5)[0].activeStreams.local.polling, true);
 });
 
 test("poll state patches message without overriding live stream content", () => {
+  resetRuntimeStore();
   const messages = createState([{ id: "local", content: "old", serverMessageId: 9 }]);
   let callbacks;
   const action = createStartBackgroundPollingAction({
@@ -151,6 +166,9 @@ test("poll state patches message without overriding live stream content", () => 
   assert.equal(messages.get()[0].content, "live");
   assert.equal(messages.get()[0].serverMessageId, 9);
   assert.equal(messages.get()[0].completedAt, 123);
+  const finalPatch = patchesForConversation(5).at(-1);
+  assert.equal(finalPatch.messages[0].content, "live");
+  assert.equal(finalPatch.activeStreams.local, undefined);
 });
 
 test("completed polling canonicalizes to db content instead of duplicated live content", () => {
@@ -213,6 +231,8 @@ test("poll state patches restored server-id message after local placeholder was 
 });
 
 test("finished callback stops poller/stream, emits notification, and updates loading", () => {
+  resetRuntimeStore();
+  runtimeStoreState.set(5, { activeStreams: { local: { polling: true }, other: { polling: true } }, generationTasks: {} });
   const backgroundPollersRef = { current: { local: 7, otherPoller: 8 } };
   const taskStreamsRef = { current: { local: {}, otherStream: {} } };
   const stopped = [];
@@ -250,6 +270,9 @@ test("finished callback stops poller/stream, emits notification, and updates loa
   assert.equal(emitted[0].href, "/chat?id=5");
   assert.equal(emitted[0].conversationTitle, "My Chat");
   assert.equal(loading.get(), true);
+  const finalPatch = patchesForConversation(5).at(-1);
+  assert.equal(finalPatch.activeStreams.local, undefined);
+  assert.equal(finalPatch.activeStreams.other.polling, true);
 });
 
 test("keep loading callback sets loading true", () => {
