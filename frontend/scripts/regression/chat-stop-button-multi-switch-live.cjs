@@ -102,16 +102,18 @@ function hasSubmit(buttons) {
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
+  const apiBaseUrl = env('STOP_BUTTON_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('STOP_BUTTON_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const model = env('STOP_BUTTON_MODEL', 'gpt-5.4-mini');
   const switchCount = Number(env('STOP_BUTTON_SWITCH_COUNT', '14'));
   const switchDelayMs = Number(env('STOP_BUTTON_SWITCH_DELAY_MS', '350'));
-  const auth = await login({ baseUrl });
+  const auth = await login({ baseUrl: apiBaseUrl });
   const stamp = Date.now();
-  const convA = await createConversation(baseUrl, auth.token, `Multi Switch A ${stamp}`, model);
-  const convB = await createConversation(baseUrl, auth.token, `Multi Switch B ${stamp}`, model);
-  const generation = await startGeneration({ baseUrl, token: auth.token, conversationId: convA.id, model });
+  const convA = await createConversation(apiBaseUrl, auth.token, `Multi Switch A ${stamp}`, model);
+  const convB = await createConversation(apiBaseUrl, auth.token, `Multi Switch B ${stamp}`, model);
+  const generation = await startGeneration({ baseUrl: apiBaseUrl, token: auth.token, conversationId: convA.id, model });
 
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { console: [], errors: [], responses: [], requestfailed: [] };
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 300)));
@@ -121,7 +123,7 @@ function hasSubmit(buttons) {
     if (u.includes('/api/chat/bootstrap') || u.includes('/api/tasks/')) events.responses.push({ status: res.status(), url: u });
   });
 
-  await page.goto(`${baseUrl}/chat/?multi_switch_probe=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`${frontendBaseUrl}/chat/?multi_switch_probe=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForSelector('[data-conversation-row]', { state: 'attached', timeout: 30000 });
 
   for (let i = 0; i < switchCount; i += 1) {
@@ -134,7 +136,7 @@ function hasSubmit(buttons) {
   let activeCount = -1;
   let lastStatus = null;
   while (Date.now() < deadline) {
-    const boot = await apiJson(`${baseUrl}/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
+    const boot = await apiJson(`${apiBaseUrl}/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
     const active = boot?.active_tasks?.chat || [];
     activeCount = active.length;
     const matching = active.find((item) => Number(item.id) === Number(generation.task.id));
@@ -151,6 +153,8 @@ function hasSubmit(buttons) {
 
   const result = {
     ok: !hasStop(stateAAfterDone) && hasSubmit(stateAAfterDone) && events.errors.length === 0,
+    apiBaseUrl,
+    frontendBaseUrl,
     currentUrl,
     convA: convA.id,
     convB: convB.id,

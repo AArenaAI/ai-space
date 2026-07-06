@@ -3,21 +3,23 @@ const { env, login, apiGet, openAuthedPage, summarizeConsole, printResult } = re
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
-  const auth = await login({ baseUrl });
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const apiBaseUrl = env('QUICK_SWITCH_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('QUICK_SWITCH_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const auth = await login({ baseUrl: apiBaseUrl });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 300)));
 
-  await page.goto(`${baseUrl}/chat/?quick_switch=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`${frontendBaseUrl}/chat/?quick_switch=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForSelector('[data-conversation-row]', { state: 'attached', timeout: 30000 });
   await page.waitForTimeout(1500);
   const visibleIds = await page.evaluate(() => Array.from(document.querySelectorAll('[data-conversation-id]')).map((el) => Number(el.getAttribute('data-conversation-id'))).filter(Boolean));
   const picked = [];
   for (const id of Array.from(new Set(visibleIds))) {
-    const data = await apiGet(`/api/conversations/${id}/messages?limit=10`, auth.token, { baseUrl }).catch(() => ({ messages: [] }));
+    const data = await apiGet(`/api/conversations/${id}/messages?limit=10`, auth.token, { baseUrl: apiBaseUrl }).catch(() => ({ messages: [] }));
     const msg = (data.messages || []).find((item) => (item.content || '').trim().length > 8);
     if (msg) picked.push({ id, needle: msg.content.trim().slice(0, 18) });
     if (picked.length >= 3) break;
@@ -42,6 +44,8 @@ const { env, login, apiGet, openAuthedPage, summarizeConsole, printResult } = re
   const oldNeedlesInMain = [a.needle, b.needle].filter((needle) => needle && mainText.includes(needle) && needle !== c.needle);
   const result = {
     picked,
+    apiBaseUrl,
+    frontendBaseUrl,
     finalId,
     expected: String(c.id),
     finalHasNeedle: mainText.includes(c.needle),

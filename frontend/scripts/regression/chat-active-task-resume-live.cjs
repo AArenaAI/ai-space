@@ -3,10 +3,12 @@ const { env, login, openAuthedPage, summarizeConsole, printResult } = require('.
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
+  const apiBaseUrl = env('ACTIVE_TASK_API_BASE_URL', baseUrl).replace(/\/+$/, '');
+  const frontendBaseUrl = env('ACTIVE_TASK_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const requestedConversationId = Number(env('TESTNET_ACTIVE_CONVERSATION_ID') || env('TESTNET_CONVERSATION_ID') || 0) || undefined;
   const requireActive = env('REQUIRE_ACTIVE_TASK') === '1';
-  const auth = await login({ baseUrl });
-  const bootstrapUrl = new URL(`${baseUrl}/api/chat/bootstrap`);
+  const auth = await login({ baseUrl: apiBaseUrl });
+  const bootstrapUrl = new URL(`${apiBaseUrl}/api/chat/bootstrap`);
   if (requestedConversationId) bootstrapUrl.searchParams.set('id', String(requestedConversationId));
   bootstrapUrl.searchParams.set('message_tail', '32');
   bootstrapUrl.searchParams.set('conversation_limit', '30');
@@ -22,13 +24,13 @@ const { env, login, openAuthedPage, summarizeConsole, printResult } = require('.
     return;
   }
   const conversationId = targetTask.conversation_id;
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 300)));
-  await page.goto(`${baseUrl}/chat/?id=${conversationId}&active_resume=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`${frontendBaseUrl}/chat/?id=${conversationId}&active_resume=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(8000);
   const mainText = await page.locator('main').innerText().catch(() => '');
@@ -37,6 +39,8 @@ const { env, login, openAuthedPage, summarizeConsole, printResult } = require('.
   const taskStreamResponse = events.responses.find((item) => item.url.includes(`/api/tasks/${targetTask.id}/stream`));
   const result = {
     conversationId,
+    apiBaseUrl,
+    frontendBaseUrl,
     activeTaskCount: activeTasks.length,
     targetTask,
     taskStreamRequested: Boolean(taskStreamRequest),
