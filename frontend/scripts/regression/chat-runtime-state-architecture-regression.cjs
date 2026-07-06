@@ -201,6 +201,9 @@ const path = require('node:path');
   const taskStreamSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatTaskStreamRuntime.ts'), 'utf8');
   const backgroundPollingSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatBackgroundPollingRuntime.ts'), 'utf8');
   const restoreSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatConversationRestoreRuntime.ts'), 'utf8');
+  const generationControlsSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatGenerationControlsRuntime.ts'), 'utf8');
+  const lifecycleSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatConversationLifecycle.ts'), 'utf8');
+  const localActionsSource = fs.readFileSync(path.join(repoRoot, 'hooks/useChatLocalActions.ts'), 'utf8');
   assert.ok(createRuntimeSource.includes('chatRuntimeStore'), 'conversation create runtime should seed the shared runtime store');
   assert.ok(createRuntimeSource.includes('setActiveConversation(data.id)'), 'created conversations should become the explicit active runtime conversation');
   assert.ok(createRuntimeSource.includes('deleteConversation(tempConversationId)'), 'failed/replaced temp conversations should be removed from the runtime store');
@@ -210,6 +213,11 @@ const path = require('node:path');
   assert.ok(taskStreamSource.includes('syncActiveTaskStreamsToRuntime'), 'task stream runtime should sync active task metadata into the runtime store');
   assert.ok(backgroundPollingSource.includes('syncBackgroundPollingToRuntime'), 'background polling runtime should sync polling/message state into the runtime store');
   assert.ok(restoreSource.includes('syncRestoreSnapshotToRuntime'), 'restore runtime should sync cache/restore snapshots into the runtime store');
+  assert.ok(generationControlsSource.includes('syncGenerationControlMessagesToRuntime'), 'generation controls should sync fork/refresh messages into the runtime store');
+  assert.ok(generationControlsSource.includes('clearGenerationControlActivity'), 'generation controls should clear active runtime metadata on stop');
+  assert.ok(lifecycleSource.includes('chatRuntimeStore.setActiveConversation'), 'conversation lifecycle should keep active runtime conversation in sync');
+  assert.ok(lifecycleSource.includes('chatRuntimeStore.patchConversation(conversationId'), 'load-more lifecycle should sync prepended messages into the runtime store');
+  assert.ok(localActionsSource.includes('chatRuntimeStore.setActiveConversation(undefined)'), 'local clear action should clear active runtime conversation');
 
   console.log(JSON.stringify({ ok: true, notifications: notificationCount, aborted: aborted.length }, null, 2));
 })().catch((error) => {

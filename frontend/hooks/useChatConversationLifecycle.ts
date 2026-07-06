@@ -10,6 +10,7 @@ import {
   resolveTotalMessages,
   shouldStartLoadMore,
 } from "@/lib/chatLoadMoreCoordinator";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 export type ChatConversationLifecycleState = {
   conversationTitle: string;
@@ -96,6 +97,7 @@ export function createSetCreatedConversationAction(input: {
   return (conversationId: number, title: string) => {
     input.setConversationTitle(title);
     input.setCurrentConversation(conversationId);
+    chatRuntimeStore.setActiveConversation(conversationId);
     markConversationCreated({
       shouldResetRef: input.shouldResetRef,
       justCreatedRef: input.justCreatedRef,
@@ -128,6 +130,7 @@ export function createSetLoadedConversationAction(input: {
   }) => {
     input.setConversationTitle(conversation.title);
     input.setCurrentConversation(conversation.id);
+    chatRuntimeStore.setActiveConversation(conversation.id);
     input.setLoadedPersistedMessages(conversation.loadedPersistedMessages);
     input.setTotalMessages(conversation.totalMessages);
   };
@@ -141,7 +144,10 @@ export function createApplyNavigationResetLifecycleAction(input: {
 }) {
   return (plan: ConversationNavigationResetLifecyclePlan) => {
     if (plan.shouldClearConversationTitle) input.setConversationTitle(plan.conversationTitle);
-    if (plan.shouldSetCurrentConversation) input.setCurrentConversation(plan.currentConversation);
+    if (plan.shouldSetCurrentConversation) {
+      input.setCurrentConversation(plan.currentConversation);
+      chatRuntimeStore.setActiveConversation(plan.currentConversation);
+    }
     input.setLoadedPersistedMessages(plan.loadedPersistedMessages);
     input.setTotalMessages(plan.totalMessages);
   };
@@ -158,6 +164,7 @@ export function createApplyJustCreatedNavigationLifecycleAction(input: {
       input.justCreatedRef.current = undefined;
     }
     input.setCurrentConversation(plan.conversationId);
+    chatRuntimeStore.setActiveConversation(plan.conversationId);
     input.setLoadedPersistedMessages(plan.loadedPersistedMessages);
     input.setTotalMessages(plan.totalMessages);
   };
@@ -167,7 +174,10 @@ export function createApplyLoadExistingNavigationLifecycleAction(input: {
   setCurrentConversation: Dispatch<SetStateAction<number | undefined>>;
 }) {
   return (plan: ConversationLoadExistingNavigationLifecyclePlan) => {
-    if (plan.shouldSetCurrentConversation) input.setCurrentConversation(plan.conversationId);
+    if (plan.shouldSetCurrentConversation) {
+      input.setCurrentConversation(plan.conversationId);
+      chatRuntimeStore.setActiveConversation(plan.conversationId);
+    }
   };
 }
 
@@ -200,7 +210,11 @@ export function createLoadMoreMessagesAction(input: CreateLoadMoreMessagesAction
       });
       if (!data) return;
       const olderMessages = mapMessages(data, { fallbackId: input.fallbackId }) as Message[];
-      input.setMessages((prev) => prependMessages(prev, olderMessages));
+      input.setMessages((prev) => {
+        const next = prependMessages(prev, olderMessages);
+        chatRuntimeStore.patchConversation(conversationId, { messages: next, updatedAt: Date.now() });
+        return next;
+      });
       input.setLoadedPersistedMessages((prev) =>
         resolveLoaded({
           previousLoaded: prev,

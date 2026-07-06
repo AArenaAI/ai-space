@@ -11,6 +11,8 @@ const outFile = path.join(tempDir, "useChatConversationLifecycle.cjs");
 const sourceFile = path.join(repoRoot, "hooks/useChatConversationLifecycle.ts");
 let source = fs.readFileSync(sourceFile, "utf8");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
+const runtimeStoreCalls = [];
+source = source.replace(/import \{ chatRuntimeStore \} from "@\/lib\/chatRuntime";\n/g, "const chatRuntimeStore = { patchConversation: (...args) => globalThis.__runtimeStoreCalls.push(['patchConversation', ...args]), setActiveConversation: (...args) => globalThis.__runtimeStoreCalls.push(['setActiveConversation', ...args]) };\n");
 source = source.replace(
   /import \{\n  buildLoadMorePage,[\s\S]*?\} from "@\/lib\/chatLoadMoreCoordinator";/,
   `function buildLoadMorePage({ totalMessages, loadedPersistedMessages }) {
@@ -41,6 +43,7 @@ fs.writeFileSync(
     '{ useCallback: (fn) => fn, useMemo: (fn) => fn(), useRef: (initial) => ({ current: initial }), useState: (initial) => [initial, () => {}] }'
   )
 );
+globalThis.__runtimeStoreCalls = runtimeStoreCalls;
 
 const {
   hasMorePersistedMessages,
@@ -68,6 +71,12 @@ function createState(initial) {
     },
   };
 }
+function resetRuntimeStore() {
+  runtimeStoreCalls.length = 0;
+}
+function runtimeCalls(type) {
+  return runtimeStoreCalls.filter((call) => call[0] === type);
+}
 
 test("hasMorePersistedMessages compares total and loaded counts", () => {
   assert.equal(hasMorePersistedMessages(51, 50), true);
@@ -84,6 +93,7 @@ test("markConversationCreated suppresses reset and records just-created id", () 
 });
 
 test("createSetCreatedConversationAction sets title/current and creation refs", () => {
+  resetRuntimeStore();
   const title = createState("");
   const current = createState(undefined);
   const shouldResetRef = { current: true };
@@ -99,6 +109,7 @@ test("createSetCreatedConversationAction sets title/current and creation refs", 
   assert.equal(current.get(), 7);
   assert.equal(shouldResetRef.current, false);
   assert.equal(justCreatedRef.current, 7);
+  assert.deepEqual(runtimeCalls("setActiveConversation").at(-1), ["setActiveConversation", 7]);
 });
 
 test("createResetConversationPaginationAction clears loaded and total counts", () => {
@@ -193,6 +204,7 @@ test("load-existing navigation lifecycle only sets current conversation when req
 });
 
 test("createLoadMoreMessagesAction loads, prepends and updates counters", async () => {
+  resetRuntimeStore();
   const messages = createState([{ id: "existing", serverMessageId: 20 }]);
   const loading = createState(false);
   const loaded = createState(50);
@@ -226,6 +238,9 @@ test("createLoadMoreMessagesAction loads, prepends and updates counters", async 
   assert.equal(messages.get()[1].id, "existing");
   assert.equal(loaded.get(), 51);
   assert.equal(total.get(), 120);
+  const patch = runtimeCalls("patchConversation").at(-1);
+  assert.equal(patch[1], 3);
+  assert.deepEqual(patch[2].messages.map((message) => message.id), ["older-local", "existing"]);
 });
 
 test("createLoadMoreMessagesAction no-ops when guard fails", async () => {

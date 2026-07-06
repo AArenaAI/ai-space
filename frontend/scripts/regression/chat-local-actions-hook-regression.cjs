@@ -12,6 +12,8 @@ const sourceFile = path.join(repoRoot, "hooks/useChatLocalActions.ts");
 const coordinatorFile = path.join(repoRoot, "lib/chatLocalActionCoordinator.ts");
 let source = fs.readFileSync(sourceFile, "utf8");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
+const runtimeStoreCalls = [];
+source = source.replace(/import \{ chatRuntimeStore \} from "@\/lib\/chatRuntime";\n/g, "const chatRuntimeStore = { setActiveConversation: (...args) => globalThis.__runtimeStoreCalls.push(['setActiveConversation', ...args]) };\n");
 source = source.replace(
   /import \{\n  buildClearMessagesState,\n  buildRegenerateRequest,\n  switchGroupView,\n\} from "@\/lib\/chatLocalActionCoordinator";/,
   fs.readFileSync(coordinatorFile, "utf8").replace(/export /g, "")
@@ -26,6 +28,7 @@ const compiled = ts.transpileModule(source, {
   fileName: sourceFile,
 });
 fs.writeFileSync(outFile, compiled.outputText.replace('require("react")', '{}'));
+globalThis.__runtimeStoreCalls = runtimeStoreCalls;
 
 const {
   createClearMessagesAction,
@@ -55,6 +58,7 @@ test("createClearMessagesAction clears messages and conversation", () => {
   action();
   assert.deepEqual(messages.get(), []);
   assert.equal(conversation.get(), undefined);
+  assert.deepEqual(runtimeStoreCalls.at(-1), ["setActiveConversation", undefined]);
 });
 
 test("createRegenerateMessageAction sends latest user message", async () => {

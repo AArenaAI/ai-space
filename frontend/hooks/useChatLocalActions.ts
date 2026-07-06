@@ -6,6 +6,7 @@ import {
   buildRegenerateRequest,
   switchGroupView,
 } from "@/lib/chatLocalActionCoordinator";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 export type SendRegenerateMessage = (
   content: string,
@@ -22,6 +23,7 @@ export function createClearMessagesAction(input: {
     const clearState = buildClearMessagesState();
     input.setMessages(clearState.messages as Message[]);
     input.setCurrentConversation(clearState.currentConversation);
+    chatRuntimeStore.setActiveConversation(undefined);
   };
 }
 
