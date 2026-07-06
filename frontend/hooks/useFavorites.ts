@@ -17,6 +17,8 @@ export interface FavoriteItem {
   created_at: string;
   conv_title?: string;
   user_query?: string;
+  block_id?: string;
+  matched_block_id?: string;
 }
 
 export interface FavoritesResponse {

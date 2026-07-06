@@ -113,6 +113,7 @@
     "test:chat-markdown-code-fixture": "node scripts/regression/chat-markdown-code-fixture.cjs",
     "test:chat-markdown-token-fixture": "node scripts/regression/chat-markdown-token-fixture.cjs",
     "test:chat-markdown-coverage-fixture": "node scripts/regression/chat-markdown-coverage-fixture.cjs",
+    "test:chat-target-href": "node scripts/regression/chat-target-href-regression.cjs",
     "test:chat-scroll-intent-fixture": "node scripts/regression/chat-scroll-intent-fixture.cjs",
     "test:chat-text-selection-fixture": "node scripts/regression/chat-text-selection-fixture.cjs",
     "test:chat-user-content-fixture": "node scripts/regression/chat-user-content-fixture.cjs",

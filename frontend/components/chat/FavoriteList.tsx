@@ -6,6 +6,7 @@ import { Star, X, MessageSquare, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFavorites, FavoriteItem } from "@/hooks/useFavorites";
 import { useI18n } from "@/lib/i18n";
+import { buildChatTargetHref } from "@/lib/chatTargetHref";
 
 interface FavoriteListProps {
   open: boolean;
@@ -122,7 +123,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: () => 
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => router.push(`/chat?id=${item.conv_id}&message=${item.message_id}`, { scroll: false })}
+            onClick={() => router.push(buildChatTargetHref({ conversationId: item.conv_id, messageId: item.message_id, blockId: item.block_id || item.matched_block_id }), { scroll: false })}
             className="p-1.5 rounded-md text-text-tertiary hover:text-brand hover:bg-brand/10 transition-colors"
             title={t("favorites.backToConversation")}
           >

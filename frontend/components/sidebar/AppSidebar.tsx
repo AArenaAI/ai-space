@@ -44,6 +44,7 @@ import type { Notebook } from "@/lib/notebookTypes";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { saveConversationScrollState } from "@/lib/chatConversationScrollState";
 import { sortSidebarConversations } from "@/lib/chatSidebarHistory";
+import { buildChatTargetHref } from "@/lib/chatTargetHref";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
 import { apiFetch, apiJson } from "@/lib/api/client";
 import { logoutBrowserSession } from "@/lib/auth/state";
@@ -70,6 +71,8 @@ interface ConversationSearchResult extends Conversation {
   matched_content?: string;
   matched_role?: string;
   matched_message_id?: number;
+  matched_block_id?: string;
+  block_id?: string;
 }
 
 type SidebarNotebookItem = Pick<Notebook, "id" | "title" | "description" | "file_count" | "updated_at"> & {
@@ -695,10 +698,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
         const idx = searchSelectedIndex >= 0 ? searchSelectedIndex : 0;
         const conv = searchResults[idx];
         if (conv) {
-          const targetMessageParam = conv.matched_message_id ? `&message=${conv.matched_message_id}` : "";
-          const convHref = conv.skill_key
-            ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}${targetMessageParam}`
-            : `/chat?id=${conv.id}${targetMessageParam}`;
+          const convHref = buildChatTargetHref({
+            conversationId: conv.id,
+            skillKey: conv.skill_key,
+            messageId: conv.matched_message_id,
+            blockId: conv.matched_block_id || conv.block_id,
+          });
           setOptimisticConvId(String(conv.id));
           router.push(convHref, { scroll: false });
           setSearchOpen(false);
@@ -1676,10 +1681,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                       {t("sidebar.search.results_found")} {searchResults.length} {t("sidebar.search.results_count_suffix")}
                     </div>
                     {searchResults.map((conv, idx) => {
-                      const targetMessageParam = conv.matched_message_id ? `&message=${conv.matched_message_id}` : "";
-                      const convHref = conv.skill_key
-                        ? `/skills/chat?key=${conv.skill_key}&id=${conv.id}${targetMessageParam}`
-                        : `/chat?id=${conv.id}${targetMessageParam}`;
+                      const convHref = buildChatTargetHref({
+                        conversationId: conv.id,
+                        skillKey: conv.skill_key,
+                        messageId: conv.matched_message_id,
+                        blockId: conv.matched_block_id || conv.block_id,
+                      });
                       const skillMeta = conv.skill_key ? SKILL_ICON_MAP[conv.skill_key] : null;
                       const IconComp = skillMeta ? skillMeta.icon : MessageSquare;
                       const isSelected = idx === searchSelectedIndex;

@@ -7,6 +7,7 @@ import { FavoriteItem, useFavorites } from "@/hooks/useFavorites";
 import MarkdownRenderer from "@/components/chat/MarkdownRenderer";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
+import { buildChatTargetHref } from "@/lib/chatTargetHref";
 
 export default function FavoritesPage() {
   const { t } = useI18n();
@@ -218,7 +219,7 @@ function FavoritePageCard({ item, onRemove }: { item: FavoriteItem; onRemove: ()
           </button>
           <button
             type="button"
-            onClick={() => router.push(`/chat?id=${item.conv_id}&message=${item.message_id}`, { scroll: false })}
+            onClick={() => router.push(buildChatTargetHref({ conversationId: item.conv_id, messageId: item.message_id, blockId: item.block_id || item.matched_block_id }), { scroll: false })}
             className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl border border-surface-border px-3 py-1.5 text-sm text-text-secondary transition-colors hover:border-brand/40 hover:text-brand"
           >
             <ExternalLink className="h-4 w-4" />
