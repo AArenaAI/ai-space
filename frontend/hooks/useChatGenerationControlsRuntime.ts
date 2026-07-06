@@ -21,11 +21,30 @@ import { patchMessageById } from "@/lib/chatMessageStatePatch";
 import type { ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { Message } from "@/lib/chatTypes";
 import { readAuthState } from "@/lib/auth/state";
-import { chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
+import { chatRuntimeStore, chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
 
 type AbortReason = "user" | "navigation" | null;
 
 type HeadersRecord = Record<string, string>;
+
+function syncGenerationControlMessagesToRuntime(conversationId: number | undefined, messages: Message[], compareModels?: string[]) {
+  if (!conversationId) return;
+  chatRuntimeStore.patchConversation(conversationId, {
+    messages,
+    ...(compareModels ? { compareModels } : {}),
+    updatedAt: Date.now(),
+  });
+}
+
+function clearGenerationControlActivity(conversationId: number | undefined) {
+  if (!conversationId) return;
+  chatRuntimeStore.patchConversation(conversationId, {
+    activeStreams: {},
+    generationTasks: {},
+    pendingOptimisticMessages: [],
+    updatedAt: Date.now(),
+  });
+}
 
 type StopGenerationDeps = {
   apiBaseUrl: string;
@@ -78,6 +97,7 @@ export function createStopGenerationAction({
         abortTaskStreams: () => {
           Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
           taskStreamsRef.current = {};
+          clearGenerationControlActivity(currentConversation);
         },
         abortStreamOwners: () => {
           if (typeof currentConversation === "number") streamOwnerRegistry.abortConversation(currentConversation, "stop");
@@ -211,6 +231,7 @@ export function createForkChatAction({
           groupIndex: sourceIndex >= 0 ? sourceIndex : 0,
           groupModels: modelIds,
         };
+        syncGenerationControlMessagesToRuntime(currentConversation, next, modelIds);
         return next;
       });
     }
@@ -239,17 +260,21 @@ export function createForkChatAction({
         const controllers: AbortController[] = placeholderMessages.map(() => new AbortController());
         if (compareAbortControllersRef) compareAbortControllersRef.current = controllers;
 
-        setMessages((prev) => prev.map((message) => {
-          if (message.serverMessageId === messageId) {
-            return {
-              ...message,
-              groupId,
-              groupIndex: sourceIndex >= 0 ? sourceIndex : 0,
-              groupModels: resolvedModels,
-            };
-          }
-          return message;
-        }));
+        setMessages((prev) => {
+          const next = prev.map((message) => {
+            if (message.serverMessageId === messageId) {
+              return {
+                ...message,
+                groupId,
+                groupIndex: sourceIndex >= 0 ? sourceIndex : 0,
+                groupModels: resolvedModels,
+              };
+            }
+            return message;
+          });
+          syncGenerationControlMessagesToRuntime(convId, next, resolvedModels);
+          return next;
+        });
 
         await Promise.all(placeholderMessages.map(async (assistantMsg, idx) => {
           const controller = controllers[idx];
@@ -304,11 +329,16 @@ export function createForkChatAction({
               (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
               (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
             );
-            if (existingIndex >= 0) return patchMessageById(prev, prev[existingIndex].id, serverBoundAssistant);
-            const sourcePosition = prev.findIndex((message) => message.serverMessageId === messageId);
-            if (sourcePosition < 0) return [...prev, serverBoundAssistant];
-            const next = [...prev];
-            next.splice(sourcePosition + 1 + idx, 0, serverBoundAssistant);
+            const next = existingIndex >= 0
+              ? patchMessageById(prev, prev[existingIndex].id, serverBoundAssistant)
+              : (() => {
+                const sourcePosition = prev.findIndex((message) => message.serverMessageId === messageId);
+                if (sourcePosition < 0) return [...prev, serverBoundAssistant];
+                const inserted = [...prev];
+                inserted.splice(sourcePosition + 1 + idx, 0, serverBoundAssistant);
+                return inserted;
+              })();
+            syncGenerationControlMessagesToRuntime(convId, next, resolvedModels);
             return next;
           });
           const response = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/stream?after=0`, {
@@ -318,12 +348,16 @@ export function createForkChatAction({
           if (!response.ok) throw new Error("Fork task stream request failed");
           const result = await streamResponse(response, assistantMsg, controller, convId);
           if (result?.recoverable) {
-            setMessages((prev) => patchMessageById(prev, assistantMsg.id, (m) => ({
-              ...m,
-              serverMessageId: result.serverMessageId || m.serverMessageId,
-              generationTaskId: result.generationTaskId || m.generationTaskId,
-              activityStatus: createBusyGeneratingStatus(translate),
-            })));
+            setMessages((prev) => {
+              const next = patchMessageById(prev, assistantMsg.id, (m) => ({
+                ...m,
+                serverMessageId: result.serverMessageId || m.serverMessageId,
+                generationTaskId: result.generationTaskId || m.generationTaskId,
+                activityStatus: createBusyGeneratingStatus(translate),
+              }));
+              syncGenerationControlMessagesToRuntime(convId, next, resolvedModels);
+              return next;
+            });
             if (result.serverMessageId && startBackgroundPolling) {
               startBackgroundPolling(convId, assistantMsg.id, result.serverMessageId);
             }
@@ -346,7 +380,9 @@ export function createForkChatAction({
             fallbackId,
           });
           if (refreshState) {
-            setMessages(refreshState.messages as Message[]);
+            const refreshedMessages = refreshState.messages as Message[];
+            setMessages(refreshedMessages);
+            syncGenerationControlMessagesToRuntime(convId, refreshedMessages, resolvedModels);
             setLoadedPersistedMessages(refreshState.messages.length);
             setGroupViews(refreshState.groupViews);
           }
@@ -359,18 +395,22 @@ export function createForkChatAction({
     } catch (error) {
       if (placeholderMessages.length > 0) {
         const failedAssistantIds = new Set(placeholderMessages.map((message) => message.id));
-        setMessages((prev) => prev.map((message) => {
-          if (!failedAssistantIds.has(message.id)) return message;
-          return {
-            ...message,
-            completedAt: now(),
-            activityStatus: {
-              kind: "generating" as const,
-              status: "failed" as const,
-              label: translate("chat.status.failed"),
-            },
-          };
-        }));
+        setMessages((prev) => {
+          const next = prev.map((message) => {
+            if (!failedAssistantIds.has(message.id)) return message;
+            return {
+              ...message,
+              completedAt: now(),
+              activityStatus: {
+                kind: "generating" as const,
+                status: "failed" as const,
+                label: translate("chat.status.failed"),
+              },
+            };
+          });
+          syncGenerationControlMessagesToRuntime(currentConversation, next, modelIds);
+          return next;
+        });
       }
       throw error;
     }

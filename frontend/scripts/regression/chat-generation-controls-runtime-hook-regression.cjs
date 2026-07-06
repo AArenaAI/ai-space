@@ -14,6 +14,17 @@ const transformed = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
 }).outputText;
 
+const runtimeStoreCalls = [];
+const chatRuntimeStoreMock = {
+  patchConversation: (...args) => runtimeStoreCalls.push(["patchConversation", ...args]),
+};
+function resetRuntimeStore() {
+  runtimeStoreCalls.length = 0;
+}
+function runtimePatches(conversationId) {
+  return runtimeStoreCalls.filter((call) => call[0] === "patchConversation" && call[1] === conversationId).map((call) => call[2]);
+}
+
 const moduleCache = new Map();
 function loadModule(file) {
   if (moduleCache.has(file)) return moduleCache.get(file).exports;
@@ -50,7 +61,10 @@ function loadModule(file) {
         cancelGenerationTask: () => undefined,
       };
     }
-    if (specifier === "@/lib/chatRuntime") return { chatStreamOwnerRegistry: { abortConversation(){}, register(){}, canFinalize(){ return true; }, finalize(){ return true; } } };
+    if (specifier === "@/lib/chatRuntime") return {
+      chatRuntimeStore: chatRuntimeStoreMock,
+      chatStreamOwnerRegistry: { abortConversation(){}, register(){}, canFinalize(){ return true; }, finalize(){ return true; } },
+    };
     if (specifier === "@/lib/chatForkCoordinator") {
       return {
         runForkChatRequest: () => ({}),
@@ -100,6 +114,7 @@ function makeSetters(initialMessages = []) {
 }
 
 function testStopGenerationUsesBearerAndClearsRefs() {
+  resetRuntimeStore();
   const calls = [];
   const taskController = makeController("task", calls);
   const mainController = makeController("main", calls);
@@ -143,6 +158,9 @@ function testStopGenerationUsesBearerAndClearsRefs() {
   assert.ok(mainController.aborted);
   assert.ok(compareController.aborted);
   assert.deepEqual(calls.find((c) => c[0] === "owners"), ["owners", 42, "stop"]);
+  assert.deepEqual(runtimePatches(42).at(-1).activeStreams, {});
+  assert.deepEqual(runtimePatches(42).at(-1).generationTasks, {});
+  assert.deepEqual(runtimePatches(42).at(-1).pendingOptimisticMessages, []);
 }
 
 function testStopGenerationUsesGuestFallback() {
@@ -165,6 +183,7 @@ function testStopGenerationUsesGuestFallback() {
 }
 
 async function testForkChatRequestsAndRefreshes() {
+  resetRuntimeStore();
   const setters = makeSetters();
   const calls = [];
   const fork = createForkChatAction({
@@ -191,6 +210,8 @@ async function testForkChatRequestsAndRefreshes() {
   assert.equal(setters.calls.find((c) => c[0] === "messages")[1][0].id, "fallback-id");
   assert.equal(setters.calls.find((c) => c[0] === "loaded")[1], 1);
   assert.ok(setters.calls.find((c) => c[0] === "groups")[1] instanceof Map);
+  assert.deepEqual(runtimePatches(9).at(-1).messages.map((message) => message.id), ["fallback-id"]);
+  assert.deepEqual(runtimePatches(9).at(-1).compareModels, ["m2", "m3"]);
 }
 
 async function testForkChatAddsGeneratingPlaceholderForForkedModel() {
@@ -258,6 +279,7 @@ async function testForkChatMarksPlaceholderFailedOnRequestError() {
 }
 
 async function testStreamingForkPassesSourceUserAttachments() {
+  resetRuntimeStore();
   const initialMessages = [
     { id: "u1", role: "user", content: "分析一下", createdAt: 1000, serverMessageId: 10, files: [{ public_id: "file-public-1" }] },
     { id: "a1", role: "assistant", content: "old", createdAt: 1001, serverMessageId: 11, model: "m1" },
@@ -299,6 +321,8 @@ async function testStreamingForkPassesSourceUserAttachments() {
   assert.equal(serverBound.serverMessageId, 120);
   assert.equal(serverBound.generationTaskId, 220);
   assert.equal(serverBound.model, "m2");
+  assert.ok(runtimePatches(5).some((patch) => patch.messages?.some((message) => message.id === "assistant-task:220")));
+  assert.deepEqual(runtimePatches(5).at(-1).compareModels, ["m1", "m2"]);
 }
 
 async function testForkChatSkipsRefreshWithoutTokenAndUsesFallbackConversation() {
