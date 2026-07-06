@@ -55,6 +55,7 @@ export default function ChatContent() {
   const targetMessageId = searchParams?.get("message")
     ? Number(searchParams?.get("message"))
     : undefined;
+  const targetBlockId = searchParams?.get("block") || undefined;
   const { models, loading } = useModels();
   const bootstrap = useChatBootstrapRuntime({ conversationId });
   const effectiveModels = bootstrap.models.length > 0 ? bootstrap.models : models;
@@ -73,9 +74,10 @@ export default function ChatContent() {
       previousConversationId,
       conversationId,
       hasTargetMessage: Number.isFinite(targetMessageId),
+      hasTargetBlock: Boolean(targetBlockId),
       loadingModels: loading,
     });
-  }, [conversationId, targetMessageId, loading]);
+  }, [conversationId, targetMessageId, targetBlockId, loading]);
 
   if (!mounted || (bootstrap.status === "loading" && effectiveModels.length === 0) || (loading && effectiveModels.length === 0)) return <ChatSkeleton />;
   if (chatPageState === "anonymous" || chatPageState === "conversation-not-found" || chatPageState === "conversation-forbidden" || chatPageState === "conversation-error") {
@@ -88,7 +90,7 @@ export default function ChatContent() {
   const chatKey = newChatToken !== "default" ? `new-${newChatToken}` : "chat";
   return (
     <div className="h-full min-h-0 overflow-hidden">
-      <ChatInterface key={chatKey} conversationId={conversationId} models={effectiveModels} targetMessageId={targetMessageId} bootstrap={bootstrap.payload} isConversationShellLoading={isConversationShellLoading} />
+      <ChatInterface key={chatKey} conversationId={conversationId} models={effectiveModels} targetMessageId={targetMessageId} targetBlockId={targetBlockId} bootstrap={bootstrap.payload} isConversationShellLoading={isConversationShellLoading} />
     </div>
   );
 }

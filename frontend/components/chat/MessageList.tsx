@@ -94,6 +94,7 @@ interface MessageListProps {
   hasMoreMessages?: boolean;
   onLoadMore?: () => void | Promise<void>;
   targetMessageId?: number;
+  targetBlockId?: string;
   bottomSpacer?: number;
   onSelectModeChange?: (active: boolean) => void;
   onExitCompare?: () => void;
@@ -201,6 +202,7 @@ function MessageList({
   hasMoreMessages,
   onLoadMore,
   targetMessageId,
+  targetBlockId,
   onSelectModeChange,
   onExitCompare,
   onQuoteSelection,
@@ -668,17 +670,28 @@ function MessageList({
   }, [conversationId, hasRenderedInitialRange, restoreVisibleBlockAnchor, targetMessageId, updateScrollProgressFromElement]);
 
 
-  const centerMessageRowInScroller = useCallback((messageId: string) => {
+  const markBlockAnchorTarget = useCallback((block: HTMLElement) => {
+    block.setAttribute("data-md-anchor-restored", "true");
+    try {
+      block.animate([
+        { backgroundColor: "rgba(124,92,255,0.18)", outlineColor: "rgba(124,92,255,0.32)" },
+        { backgroundColor: "rgba(124,92,255,0.07)", outlineColor: "rgba(124,92,255,0.14)" },
+        { backgroundColor: "transparent", outlineColor: "transparent" },
+      ], { duration: 1800, easing: "ease-out" });
+    } catch {}
+    window.setTimeout(() => {
+      if (block.isConnected) block.removeAttribute("data-md-anchor-restored");
+    }, 2200);
+  }, []);
+
+  const centerElementInScroller = useCallback((target: HTMLElement) => {
     const el = scrollRef.current;
     if (!el) return false;
-    const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(messageId)}"]`);
-    if (!row) return false;
-
     const scrollerRect = el.getBoundingClientRect();
-    const rowRect = row.getBoundingClientRect();
-    const rowCenter = rowRect.top + rowRect.height / 2;
+    const targetRect = target.getBoundingClientRect();
+    const targetCenter = targetRect.top + targetRect.height / 2;
     const scrollerCenter = scrollerRect.top + scrollerRect.height / 2;
-    const delta = rowCenter - scrollerCenter;
+    const delta = targetCenter - scrollerCenter;
     if (Math.abs(delta) <= 2) return true;
 
     const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
@@ -687,6 +700,27 @@ function MessageList({
     updateScrollProgressFromElement(el);
     return true;
   }, [updateScrollProgressFromElement]);
+
+  const centerMessageRowInScroller = useCallback((messageId: string) => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(messageId)}"]`);
+    if (!row) return false;
+    return centerElementInScroller(row);
+  }, [centerElementInScroller]);
+
+  const centerMessageBlockInScroller = useCallback((messageId: string, blockId?: string) => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    const row = el.querySelector<HTMLElement>(`[data-chat-message-row="true"][data-message-id="${CSS.escape(messageId)}"]`);
+    if (!row) return false;
+    const block = blockId ? row.querySelector<HTMLElement>(`[data-md-block-id="${CSS.escape(blockId)}"]`) : null;
+    if (block) {
+      markBlockAnchorTarget(block);
+      return centerElementInScroller(block);
+    }
+    return centerElementInScroller(row);
+  }, [centerElementInScroller, markBlockAnchorTarget]);
 
   const markHistoryPrependSettling = useCallback((duration = 1600, richLiteFallbackIds: string[] = []) => {
     historyPrependUntilRef.current = Math.max(historyPrependUntilRef.current, Date.now() + duration);
@@ -1468,7 +1502,7 @@ function MessageList({
   }, [models]);
   useEffect(() => {
     if (!targetMessageId) return;
-    const targetKey = `${conversationId || "new"}:${targetMessageId}`;
+    const targetKey = `${conversationId || "new"}:${targetMessageId}:${targetBlockId || "message"}`;
     if (locatedTargetKeyRef.current === targetKey || isLoadingHistory) return;
 
     const anchorMessage = targetAnchorMessage;
@@ -1505,20 +1539,22 @@ function MessageList({
     highlightMessage(anchorMessage.id, 2600);
 
     const scrollToTarget = () => {
-      centerMessageRowInScroller(anchorMessage.id);
-      window.requestAnimationFrame(() => centerMessageRowInScroller(anchorMessage.id));
+      centerMessageBlockInScroller(anchorMessage.id, targetBlockId);
+      window.requestAnimationFrame(() => centerMessageBlockInScroller(anchorMessage.id, targetBlockId));
     };
 
     const raf = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(scrollToTarget);
     });
     const settleTimer = window.setTimeout(scrollToTarget, 120);
+    const lateSettleTimer = targetBlockId ? window.setTimeout(scrollToTarget, 520) : 0;
 
     return () => {
       window.cancelAnimationFrame(raf);
       window.clearTimeout(settleTimer);
+      if (lateSettleTimer) window.clearTimeout(lateSettleTimer);
     };
-  }, [allVisibleMessages, centerMessageRowInScroller, conversationId, targetMessageId, targetAnchorMessage, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage, groups, effectiveIsCompare]);
+  }, [allVisibleMessages, centerMessageBlockInScroller, conversationId, targetMessageId, targetBlockId, targetAnchorMessage, visibleMessages, isLoadingHistory, isLoadingMore, hasMoreMessages, onLoadMore, highlightMessage, groups, effectiveIsCompare]);
 
   useEffect(() => {
     if (!targetMessageId) {

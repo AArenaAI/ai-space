@@ -66,6 +66,7 @@ interface ChatInterfaceProps {
   welcomeSubtitle?: string;
   welcomeExamples?: { title: string; desc: string; prompt: string }[];
   targetMessageId?: number;
+  targetBlockId?: string;
   externalSendRequest?: { id: number; content: string; hidden?: boolean } | null;
   modelSelectionOptions?: { storageKey?: string; defaultModelId?: string };
   onSaveAssistantToNote?: (content: string) => void;
@@ -79,7 +80,7 @@ export function buildHiddenUserMessageContent(content: string) {
   return `${HIDDEN_USER_MESSAGE_PREFIX}\n${content}`;
 }
 
-export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote, bootstrap, isConversationShellLoading = false }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, notebookId, notebookTitle, notebookFileCount, notebookFileIds, notebookHero, models, skillKey, recommendedModel, welcomeTitle, welcomeSubtitle, welcomeExamples, targetMessageId, targetBlockId, externalSendRequest, modelSelectionOptions, onSaveAssistantToNote, bootstrap, isConversationShellLoading = false }: ChatInterfaceProps) {
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const { t } = useI18n();
   const [compareMode, setCompareMode] = useState(false);
@@ -166,7 +167,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     isCompare: compareMode || isCompare,
     notebookId,
     targetMessageId,
-  }), [conversationId, currentConversation, messages.length, isLoading, isLoadingHistory, compareMode, isCompare, notebookId, targetMessageId]);
+    targetBlockId,
+  }), [conversationId, currentConversation, messages.length, isLoading, isLoadingHistory, compareMode, isCompare, notebookId, targetMessageId, targetBlockId]);
 
   useEffect(() => {
     const commitAt = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -552,6 +554,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const inputIsLoading = isCurrentConversationGenerating;
   const activeCompareModelIds = selectedModels.length > 0 ? selectedModels : compareModels;
   const activeTargetMessageId = compareTargetMessageId ?? (currentConversation === conversationId ? targetMessageId : undefined);
+  const activeTargetBlockId = activeTargetMessageId && currentConversation === conversationId && !compareTargetMessageId ? targetBlockId : undefined;
   const isEmptyNewCompareMode = messages.length === 0 && !conversationId && activeCompareMode;
   const shouldDelayEmptyCompareLayout = isEmptyNewCompareMode && !emptyCompareLayoutReady;
   const isNewEmptyChat = messages.length === 0 && !conversationId && !activeCompareMode && !isConversationShellLoading;
@@ -710,6 +713,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           hasMoreMessages={hasMoreMessages}
           onLoadMore={loadMoreMessages}
           targetMessageId={activeTargetMessageId}
+          targetBlockId={activeTargetBlockId}
           onSelectModeChange={setMessageSelectMode}
           onExitCompare={handleExitCompare}
           onQuoteSelection={handleQuoteSelection}

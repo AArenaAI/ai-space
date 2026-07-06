@@ -215,6 +215,37 @@ async function getActiveOverviewId(page) {
     assert.equal(targetedAssistant.userHighlighted, false, `paired user should not be highlighted for assistant target: ${JSON.stringify(targetedAssistant)}`);
     assert.ok(targetedAssistant.assistantTop >= targetedAssistant.scrollerTop && targetedAssistant.assistantBottom <= targetedAssistant.scrollerBottom, `targeted assistant should be in viewport: ${JSON.stringify(targetedAssistant)}`);
     assert.ok(targetedAssistant.centerDelta <= Math.max(64, targetedAssistant.scrollerHeight * 0.12), `targeted assistant should be near centered: ${JSON.stringify(targetedAssistant)}`);
+    await page.click('[data-testid="overview-target-block"]');
+    await page.waitForTimeout(900);
+    const targetedBlock = await page.evaluate(() => {
+      const assistant = document.querySelector('[data-chat-message-row="true"][data-server-message-id="4"]');
+      const block = assistant?.querySelector('[data-md-block-id="overview-assistant-2:3"]');
+      const scroller = document.querySelector('[data-testid="chat-history-scroll-container"]');
+      const blockRect = block?.getBoundingClientRect();
+      const assistantRect = assistant?.getBoundingClientRect();
+      const scrollerRect = scroller?.getBoundingClientRect();
+      const blockCenter = blockRect ? blockRect.top + blockRect.height / 2 : -1;
+      const scrollerCenter = scrollerRect ? scrollerRect.top + scrollerRect.height / 2 : -1;
+      return {
+        assistantFound: Boolean(assistant),
+        blockFound: Boolean(block),
+        blockHighlighted: block?.getAttribute('data-md-anchor-restored') === 'true',
+        assistantHighlighted: assistant?.className.includes('bg-brand/10') ?? false,
+        blockTop: blockRect?.top ?? -1,
+        blockBottom: blockRect?.bottom ?? -1,
+        assistantTop: assistantRect?.top ?? -1,
+        scrollerTop: scrollerRect?.top ?? 0,
+        scrollerBottom: scrollerRect?.bottom ?? 0,
+        centerDelta: Math.abs(blockCenter - scrollerCenter),
+        scrollerHeight: scrollerRect?.height ?? 0,
+      };
+    });
+    assert.ok(targetedBlock.assistantFound, `targeted block assistant row should be rendered: ${JSON.stringify(targetedBlock)}`);
+    assert.ok(targetedBlock.blockFound, `targeted markdown block should be rendered: ${JSON.stringify(targetedBlock)}`);
+    assert.ok(targetedBlock.blockHighlighted, `targeted markdown block should receive transient block highlight: ${JSON.stringify(targetedBlock)}`);
+    assert.ok(targetedBlock.assistantHighlighted, `targeted block should keep message row highlighted for orientation: ${JSON.stringify(targetedBlock)}`);
+    assert.ok(targetedBlock.blockTop >= targetedBlock.scrollerTop && targetedBlock.blockBottom <= targetedBlock.scrollerBottom, `targeted markdown block should be in viewport: ${JSON.stringify(targetedBlock)}`);
+    assert.ok(targetedBlock.centerDelta <= Math.max(80, targetedBlock.scrollerHeight * 0.16), `targeted markdown block should be near centered: ${JSON.stringify(targetedBlock)}`);
     await page.click('[data-testid="overview-clear-target"]');
     await page.waitForTimeout(120);
 
