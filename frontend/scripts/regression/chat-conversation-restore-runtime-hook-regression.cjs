@@ -20,6 +20,10 @@ let statusImpl = async () => undefined;
 let countImpl = async () => undefined;
 const snapshotCache = new Map();
 const persistentSnapshotCache = new Map();
+const runtimeStoreCalls = [];
+const chatRuntimeStoreMock = {
+  patchConversation: (...args) => runtimeStoreCalls.push(["patchConversation", ...args]),
+};
 
 function makeController() {
   return { aborted: false, abort() { this.aborted = true; }, signal: { aborted: false } };
@@ -121,6 +125,7 @@ function loadModule(file) {
       };
     }
     if (specifier === "@/lib/chatActivityStatus") return { createBusyGeneratingStatus: () => ({ kind: "generating", label: "busy" }), createGeneratingStatus: () => ({ kind: "generating", label: "generating" }) };
+    if (specifier === "@/lib/chatRuntime") return { chatRuntimeStore: chatRuntimeStoreMock };
     if (specifier.startsWith("@/")) return {};
     return require(specifier);
   };
@@ -188,6 +193,10 @@ function runRuntime(overrides = {}) {
   return { state, refs, lifecycle, starts, mainController, compareController };
 }
 function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
+function resetRuntimeStoreCalls() { runtimeStoreCalls.length = 0; }
+function lastRuntimePatchFor(conversationId) {
+  return runtimeStoreCalls.filter((entry) => entry[0] === "patchConversation" && entry[1] === conversationId).at(-1);
+}
 
 async function testResetPlanClearsUiWhenAllowed() {
   const { state, lifecycle } = runRuntime({ conversationId: undefined, shouldReset: true });
@@ -219,6 +228,9 @@ async function testLoadExistingRestoresStateAndCounts() {
   assert.equal(state.calls.find((c) => c[0] === "skill")?.[1], "hist");
   assert.equal(state.calls.find((c) => c[0] === "total")?.[1], 88);
   assert.equal(snapshotCache.get(9).messages[0].serverMessageId, 12);
+  const runtimePatch = lastRuntimePatchFor(9);
+  assert.equal(runtimePatch?.[2].messages[0].serverMessageId, 12);
+  assert.deepEqual(runtimePatch?.[2].compareModels, ["m1", "m2"]);
 }
 async function testCacheMissClearsStaleMessagesBeforeRestore() {
   snapshotCache.clear();
@@ -236,6 +248,7 @@ async function testCacheMissClearsStaleMessagesBeforeRestore() {
 async function testCacheHitShowsSnapshotImmediatelyAndRefreshes() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
+  resetRuntimeStoreCalls();
   snapshotCache.set(9, {
     conversationId: 9,
     title: "Cached",
@@ -254,15 +267,18 @@ async function testCacheHitShowsSnapshotImmediatelyAndRefreshes() {
   countImpl = async () => 2;
   const { state } = runRuntime({ conversationId: 9, token: "tok" });
   assert.equal(state.messages[0].content, "cached");
+  assert.equal(lastRuntimePatchFor(9)?.[2].messages[0].content, "cached");
   assert.equal(state.calls.find((c) => c[0] === "loadingHistory" && c[1] === false)?.[1], false);
   await flush(); await flush();
   assert.equal(state.messages[0].content, "fresh");
   assert.equal(snapshotCache.get(9).messages[0].content, "fresh");
   assert.equal(persistentSnapshotCache.get(9).messages[0].content, "fresh");
+  assert.equal(lastRuntimePatchFor(9)?.[2].messages[0].content, "fresh");
 }
 async function testPersistentCacheHitShowsSnapshotBeforeRefresh() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
+  resetRuntimeStoreCalls();
   persistentSnapshotCache.set(9, {
     conversationId: 9,
     title: "Persistent",
@@ -284,12 +300,14 @@ async function testPersistentCacheHitShowsSnapshotBeforeRefresh() {
   assert.deepEqual(state.calls.find((c) => c[0] === "messages")?.[1], []);
   await flush();
   assert.equal(state.messages[0].content, "persistent");
+  assert.equal(lastRuntimePatchFor(9)?.[2].messages[0].content, "persistent");
   assert.equal(state.calls.find((c) => c[0] === "skill" && c[1] === "persistent-skill")?.[1], "persistent-skill");
   restoreResolved({ title: "Fresh", model: "m2", messages: [{ id: "fresh", role: "assistant", content: "fresh" }] });
   await flush(); await flush();
   assert.equal(state.messages[0].content, "fresh");
   assert.equal(snapshotCache.get(9).messages[0].content, "fresh");
   assert.equal(persistentSnapshotCache.get(9).messages[0].content, "fresh");
+  assert.equal(lastRuntimePatchFor(9)?.[2].messages[0].content, "fresh");
 }
 async function testSnapshotVersionSkipsUnchangedRestoreReconcile() {
   snapshotCache.clear();

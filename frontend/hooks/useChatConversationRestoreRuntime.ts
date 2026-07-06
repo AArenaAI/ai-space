@@ -45,6 +45,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import { buildGroupViewsFromMessages } from "@/lib/chatForkCoordinator";
 import type { TaskStreamActiveState } from "@/hooks/useChatTaskStreamRuntime";
 import { readAuthState } from "@/lib/auth/state";
+import { chatRuntimeStore } from "@/lib/chatRuntime";
 
 type AbortReason = "user" | "navigation" | null;
 
@@ -215,6 +216,14 @@ function mergeFreshLocalMessagesIntoRestore(previous: Message[], restored: Messa
   const freshKeys = new Set(freshLocalMessages.map(getMessageMergeKey));
   const restoredWithoutFresh = restored.filter((message) => !freshKeys.has(getMessageMergeKey(message)));
   return sortMessagesByCreatedAtWhenAvailable([...restoredWithoutFresh, ...freshLocalMessages]);
+}
+
+function syncRestoreSnapshotToRuntime(snapshot: CachedConversationSnapshot) {
+  chatRuntimeStore.patchConversation(snapshot.conversationId, {
+    messages: snapshot.messages,
+    compareModels: snapshot.compareModels,
+    updatedAt: snapshot.updatedAt || snapshot.fetchedAt || Date.now(),
+  });
 }
 
 function applyCachedSnapshot({
@@ -460,6 +469,7 @@ export function useChatConversationRestoreRuntime({
         setEffectiveSkillKey,
         setIsLoadingHistory,
       });
+      syncRestoreSnapshotToRuntime(cachedSnapshot);
     } else {
       emitConversationSwitchPerformanceEvent("cache-miss", {
         conversationId: loadConversationId,
@@ -518,6 +528,7 @@ export function useChatConversationRestoreRuntime({
             setEffectiveSkillKey,
             setIsLoadingHistory,
           });
+          syncRestoreSnapshotToRuntime(persistentSnapshot);
         })
         .catch(() => {});
     }
@@ -748,6 +759,7 @@ export function useChatConversationRestoreRuntime({
           };
           setConversationSnapshot(snapshot);
           setPersistentConversationSnapshot(snapshot);
+          syncRestoreSnapshotToRuntime(snapshot);
           emitConversationSwitchPerformanceEvent("restore-reconciled", {
             conversationId: loadConversationId,
             loadSeq,
