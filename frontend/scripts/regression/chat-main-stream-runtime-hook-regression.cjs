@@ -37,6 +37,7 @@ function loadModule(file) {
         realtimeMarkCompleted: () => {},
       };
     }
+    if (specifier === "@/lib/chatRuntime") return { chatStreamOwnerRegistry: { register(){}, canFinalize(){ return true; }, finalize(){ return true; }, abortConversation(){} } };
     if (specifier === "@/lib/chatMainStreamEventHandler") return { createMainStreamEventHandler: () => { throw new Error("default handler should be injected"); } };
     if (specifier === "@/lib/chatStreamLifecycle") return { runChatStreamLifecycle: () => { throw new Error("default lifecycle should be injected"); } };
     if (specifier === "@/lib/chatFinalReconciliationCoordinator") {
@@ -118,7 +119,7 @@ function makeHandler(stateOverrides = {}) {
     state,
   };
 }
-async function runAction({ handlerState = {}, lifecycleResult = { action: "completed" }, streamContent = "streamed", realtimeData, currentConversation = 99, convId, abortReason = null, now = () => 1234 } = {}) {
+async function runAction({ handlerState = {}, lifecycleResult = { action: "completed" }, streamContent = "streamed", realtimeData, currentConversation = 99, convId, abortReason = null, now = () => 1234, streamOwnerRegistry } = {}) {
   const handlerFixture = makeHandler(handlerState);
   const calls = [];
   const resolvedRealtimeData = realtimeData === undefined ? { content: streamContent } : realtimeData;
@@ -146,6 +147,8 @@ async function runAction({ handlerState = {}, lifecycleResult = { action: "compl
     },
     realtimeGet: () => resolvedRealtimeData,
     realtimeMarkCompleted: (id, completedAt) => calls.push(["realtimeMarkCompleted", id, completedAt]),
+    registerBackgroundTask: (...args) => calls.push(["background", ...args]),
+    streamOwnerRegistry,
     now,
   });
   const result = await action(makeResponse(), makeAssistant({ groupId: "g", groupIndex: 1, groupModels: ["a", "b"], userMessageId: "u" }), makeController(), convId);
@@ -242,6 +245,30 @@ async function testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted() 
   assert.equal(messages[0].completedAt, undefined);
 }
 
+async function testStaleMainStreamOwnerSkipsFinallyReconciliation() {
+  const registryCalls = [];
+  const streamOwnerRegistry = {
+    register: (owner) => registryCalls.push(["register", owner]),
+    canFinalize: (owner) => { registryCalls.push(["canFinalize", owner]); return false; },
+    finalize: (owner) => registryCalls.push(["finalize", owner]),
+    abortConversation: () => {},
+  };
+  const { result, calls, messages, handlerCalls } = await runAction({
+    handlerState: { accumulated: "acc" },
+    streamContent: "streamed",
+    realtimeData: { content: "streamed", serverMessageId: 11 },
+    streamOwnerRegistry,
+    convId: 55,
+  });
+  assert.equal(result, undefined);
+  assert.ok(registryCalls.some((call) => call[0] === "register" && call[1].conversationId === 55 && call[1].streamId === "assistant-1"));
+  assert.ok(registryCalls.some((call) => call[0] === "canFinalize"));
+  assert.ok(!registryCalls.some((call) => call[0] === "finalize"));
+  assert.equal(messages[0].content, "");
+  assert.ok(!calls.some((call) => call[0] === "setMessages"));
+  assert.deepEqual(handlerCalls, [["event", "event-1"]]);
+}
+
 (async () => {
   await testCompletedSyncClearAndMark();
   await testLifecycleResumeStartsTaskAndReturnsUndefined();
@@ -249,5 +276,6 @@ async function testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted() 
   await testReconcileAfterDoneStartsOnlyPolling();
   await testNavigationAbortStartsTaskStreamContinuation();
   await testIgnoredLifecycleStillRunsFinallyButNoCompletionWhenAborted();
+  await testStaleMainStreamOwnerSkipsFinallyReconciliation();
   console.log("chat main stream runtime hook regression passed");
 })();

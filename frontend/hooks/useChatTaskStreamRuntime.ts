@@ -19,6 +19,7 @@ import {
 import type { Message } from "@/lib/chatTypes";
 import { getConversationSnapshot, patchConversationSnapshot } from "@/lib/chatConversationCache";
 import { readAuthState } from "@/lib/auth/state";
+import { chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
 
 export type TaskStreamActiveState = {
   convId?: number;
@@ -62,6 +63,7 @@ type StartTaskEventStreamDeps = {
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
   appliedTaskSequencesRef?: MutableRefObject<Record<string, Set<number>>>;
+  streamOwnerRegistry?: typeof defaultChatStreamOwnerRegistry;
   setMessages: Dispatch<SetStateAction<Message[]>>;
   setIsLoading: Dispatch<SetStateAction<boolean>>;
   startBackgroundPolling: StartBackgroundPolling;
@@ -80,6 +82,7 @@ type StartTaskEventStreamDeps = {
 type StopAllTaskStreamsDeps = {
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
   activeTaskStreamsRef: MutableRefObject<Record<string, TaskStreamActiveState>>;
+  streamOwnerRegistry?: Pick<typeof defaultChatStreamOwnerRegistry, "abortConversation">;
 };
 
 type StopTaskStreamDeps = {
@@ -106,9 +109,16 @@ export function useStopTaskStreamAction(taskStreamsRef: MutableRefObject<Record<
 export function createStopAllTaskStreamsAction({
   taskStreamsRef,
   activeTaskStreamsRef,
+  streamOwnerRegistry = defaultChatStreamOwnerRegistry,
 }: StopAllTaskStreamsDeps) {
   return () => {
+    const conversationIds = new Set(
+      Object.values(activeTaskStreamsRef.current)
+        .map((state) => state.convId)
+        .filter((convId): convId is number => typeof convId === "number")
+    );
     Object.values(taskStreamsRef.current).forEach((controller) => controller.abort());
+    conversationIds.forEach((convId) => streamOwnerRegistry.abortConversation(convId, "stop"));
     taskStreamsRef.current = {};
     activeTaskStreamsRef.current = {};
   };
@@ -119,6 +129,7 @@ export function createStartTaskEventStreamAction({
   taskStreamsRef,
   activeTaskStreamsRef,
   appliedTaskSequencesRef = { current: {} },
+  streamOwnerRegistry = defaultChatStreamOwnerRegistry,
   setMessages,
   setIsLoading,
   startBackgroundPolling,
@@ -172,6 +183,14 @@ export function createStartTaskEventStreamAction({
 
     const controller = createAbortController();
     taskStreamsRef.current[localMessageId] = controller;
+    const streamOwner = {
+      conversationId: convId,
+      taskId: generationTaskId,
+      serverMessageId,
+      streamId: localMessageId,
+      sequence: after || 0,
+    };
+    streamOwnerRegistry.register(streamOwner);
     if (initialContent && !realtimeGet(localMessageId)?.content) {
       realtimeUpdate(localMessageId, {
         content: initialContent,
@@ -235,6 +254,10 @@ export function createStartTaskEventStreamAction({
           delete taskStreamsRef.current[localMessageId];
           return;
         }
+        if (!streamOwnerRegistry.canFinalize(streamOwner)) {
+          delete taskStreamsRef.current[localMessageId];
+          return;
+        }
         const accumulated = taskEventHandler.getAccumulated();
         const latestSequence = taskEventHandler.getLatestSequence();
         const finalData = realtimeGet(localMessageId);
@@ -276,6 +299,7 @@ export function createStartTaskEventStreamAction({
             ));
           }
         }
+        streamOwnerRegistry.finalize(streamOwner);
         delete taskStreamsRef.current[localMessageId];
         if (shouldStartTaskStreamFallbackPolling({ serverMessageId })) {
           startBackgroundPolling(convId, localMessageId, serverMessageId);

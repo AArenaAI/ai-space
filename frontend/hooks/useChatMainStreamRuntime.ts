@@ -21,6 +21,8 @@ import {
 } from "@/lib/chatMessageStatePatch";
 import type { ChatStreamGroupContext, ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import type { ChatModel, Message } from "@/lib/chatTypes";
+import { chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry } from "@/lib/chatRuntime";
+import type { ChatStreamOwner } from "@/lib/chatStreamOwnerRegistry";
 
 type AbortReason = "user" | "navigation" | null;
 type CompareGroupContext = ChatStreamGroupContext;
@@ -56,6 +58,7 @@ type CreateMainStreamResponseDeps = {
   realtimeUpdate?: typeof defaultRealtimeUpdate;
   realtimeMarkCompleted?: typeof defaultRealtimeMarkCompleted;
   registerBackgroundTask?: typeof defaultRegisterBackgroundTask;
+  streamOwnerRegistry?: typeof defaultChatStreamOwnerRegistry;
   now?: () => number;
 };
 
@@ -75,6 +78,7 @@ export function createStreamResponseAction({
   realtimeUpdate = defaultRealtimeUpdate,
   realtimeMarkCompleted = defaultRealtimeMarkCompleted,
   registerBackgroundTask = defaultRegisterBackgroundTask,
+  streamOwnerRegistry = defaultChatStreamOwnerRegistry,
   now = Date.now,
 }: CreateMainStreamResponseDeps) {
   return async (
@@ -115,6 +119,13 @@ export function createStreamResponseAction({
       });
     };
 
+    const streamOwner: ChatStreamOwner = {
+      conversationId: convId || getCurrentConversation() || 0,
+      serverMessageId: assistantMsg.serverMessageId,
+      streamId: assistantMsg.id,
+    };
+    streamOwnerRegistry.register(streamOwner);
+
     try {
       const lifecycleResult = await runChatStreamLifecycle({
         response,
@@ -137,6 +148,10 @@ export function createStreamResponseAction({
       }
     } finally {
       const abortReason = abortReasonRef.current;
+      if (!streamOwnerRegistry.canFinalize(streamOwner)) {
+        return;
+      }
+      streamOwnerRegistry.finalize(streamOwner);
 
       mainStreamHandler.closeOpenReasoning();
       const state = mainStreamHandler.getState();

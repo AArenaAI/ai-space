@@ -18,6 +18,8 @@ source = source.replace(/import type[^;]+react[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+streaming[^;]+;\n/g, "");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
 source = source.replace(/import \{ getConversationSnapshot, patchConversationSnapshot \} from "@\/lib\/chatConversationCache";\n/g, "const getConversationSnapshot = () => undefined; const patchConversationSnapshot = () => {};\n");
+source = source.replace(/import \{ readAuthState \} from "@\/lib\/auth\/state";\n/g, "const readAuthState = () => ({ token: null });\n");
+source = source.replace(/import \{ chatStreamOwnerRegistry as defaultChatStreamOwnerRegistry \} from "@\/lib\/chatRuntime";\n/g, "const defaultChatStreamOwnerRegistry = { register(){}, canFinalize(){ return true; }, finalize(){ return true; }, abortConversation(){} };\n");
 source = source.replace(/import \{ useCallback, useRef \} from "react";\n/g, "const useCallback = (fn) => fn; const useRef = (current) => ({ current });\n");
 source = source.replace(/import \{ getGuestId as defaultGetGuestId \} from "@\/lib\/guestId";\n/g, "const defaultGetGuestId = () => 'guest';\n");
 source = source.replace(/import \{ realtimeAppend as defaultRealtimeAppend, realtimeGet as defaultRealtimeGet, realtimeUpdate as defaultRealtimeUpdate, realtimeMarkCompleted as defaultRealtimeMarkCompleted \} from "@\/lib\/streaming";\n/g, "const defaultRealtimeAppend = () => {}; const defaultRealtimeGet = () => undefined; const defaultRealtimeUpdate = () => {}; const defaultRealtimeMarkCompleted = () => {};\n");
@@ -70,17 +72,23 @@ function makeController() {
   };
 }
 
-test("createStopAllTaskStreamsAction aborts controllers and clears refs", () => {
+test("createStopAllTaskStreamsAction aborts controllers, clears refs and aborts stream owners", () => {
   const c1 = makeController();
   const c2 = makeController();
+  const ownerAborts = [];
   const taskStreamsRef = { current: { a: c1, b: c2 } };
-  const activeTaskStreamsRef = { current: { a: { content: "x" } } };
-  const stop = createStopAllTaskStreamsAction({ taskStreamsRef, activeTaskStreamsRef });
+  const activeTaskStreamsRef = { current: { a: { convId: 9, content: "x" }, b: { convId: 10, content: "y" } } };
+  const stop = createStopAllTaskStreamsAction({
+    taskStreamsRef,
+    activeTaskStreamsRef,
+    streamOwnerRegistry: { abortConversation: (...args) => ownerAborts.push(args) },
+  });
   stop();
   assert.equal(c1.signal.aborted, true);
   assert.equal(c2.signal.aborted, true);
   assert.deepEqual(taskStreamsRef.current, {});
   assert.deepEqual(activeTaskStreamsRef.current, {});
+  assert.deepEqual(ownerAborts, [[9, "stop"], [10, "stop"]]);
 });
 
 test("createStartTaskEventStreamAction guards missing ids and duplicate streams", () => {
@@ -258,6 +266,40 @@ test("finally preserves local content for server-backed task streams and waits f
   assert.deepEqual(completed, []);
   assert.equal(taskStreamsRef.current.local, undefined);
   assert.deepEqual(started.at(-1), [5, "local", 9]);
+});
+
+test("stale task stream owner skips finally patching and fallback", async () => {
+  const calls = [];
+  const messages = createState([{ id: "local", content: "old" }]);
+  const ownerRegistry = {
+    register: (owner) => calls.push(["register", owner]),
+    canFinalize: (owner) => { calls.push(["canFinalize", owner]); return false; },
+    finalize: (owner) => calls.push(["finalize", owner]),
+    abortConversation: () => {},
+  };
+  const action = createStartTaskEventStreamAction({
+    apiBaseUrl: "",
+    taskStreamsRef: { current: {} },
+    activeTaskStreamsRef: { current: {} },
+    setMessages: messages.set,
+    setIsLoading: () => {},
+    startBackgroundPolling: (...args) => calls.push(["poll", ...args]),
+    translate: (key) => key,
+    getToken: () => null,
+    createAbortController: makeController,
+    streamOwnerRegistry: ownerRegistry,
+    createTaskStreamEventHandler: () => ({ processEvent(){}, getAccumulated(){ return "final"; }, getLatestSequence(){ return 99; } }),
+    realtimeGet: () => ({ content: "rt" }),
+    runTaskEventStream: async () => {},
+  });
+  action(5, "local", 9, 0, "", 22);
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(calls.some((call) => call[0] === "register" && call[1].conversationId === 5 && call[1].taskId === 22));
+  assert.ok(calls.some((call) => call[0] === "canFinalize"));
+  assert.deepEqual(messages.get(), [{ id: "local", content: "old" }]);
+  assert.ok(!calls.some((call) => call[0] === "poll"));
+  assert.ok(!calls.some((call) => call[0] === "finalize"));
 });
 
 test("non-aborted stream error starts catch fallback plus final fallback", async () => {

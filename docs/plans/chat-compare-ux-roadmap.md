@@ -564,7 +564,7 @@ ConversationRuntimeStore
 
 ### 13. Stream ownership 正式化
 
-**状态:** 🟡 第一包已完成 owner registry，后续接入真实 stream runtime
+**状态:** 🟡 第三包已完成真实 task/main stream runtime 接入，后续继续扩展到 Compare/更多 abort 调用点
 
 **已完成:**
 
@@ -597,6 +597,13 @@ conversationId -> activeStreams
 
 - 新增 `frontend/lib/chatStreamOwnerRegistry.ts`，支持 owner register、replacement abort、`canFinalize(owner)`、stale finalize no-op、conversation-level abort。
 - 回归覆盖 replacement owner 不能 finalize、new owner 可以 finalize、conversation abort 清理 owner。
+
+**已完成第三包:**
+
+- `useChatTaskStreamRuntime` 已注册 task stream owner，finally 前必须 `canFinalize(owner)`；stale owner 不再 patch message、不再启动 fallback polling。
+- `useChatMainStreamRuntime` 已注册 main stream owner，finally reconciliation 前必须 `canFinalize(owner)`；stale owner 不再 close/reconcile/mark completed。
+- `createStopAllTaskStreamsAction` 会按 active task conversation 调用 `abortConversation(convId, "stop")`，避免 owner 残留。
+- 回归覆盖：task stale owner、main stale owner、stopAll owner abort、正常 fallback/polling 路径保持不变。
 
 ---
 
