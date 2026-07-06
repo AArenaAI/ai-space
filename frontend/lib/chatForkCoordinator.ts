@@ -228,9 +228,13 @@ export async function fetchForkConversationRefresh({
   token: string;
   fetchImpl?: typeof fetch;
 }): Promise<ForkChatRefreshResponse | undefined> {
-  const res = await fetchImpl(`${apiBaseUrl}/api/conversations/${conversationId}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const headers = { Authorization: `Bearer ${token}` };
+  const isBrowserSameOriginApi = typeof window !== "undefined"
+    && fetchImpl === fetch
+    && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+  const res = isBrowserSameOriginApi
+    ? await import("@/lib/api/client").then(({ apiFetch }) => apiFetch(`/conversations/${conversationId}`, { headers }))
+    : await fetchImpl(`${apiBaseUrl}/api/conversations/${conversationId}`, { headers, credentials: "include" });
   if (!res.ok) return undefined;
   return await res.json();
 }

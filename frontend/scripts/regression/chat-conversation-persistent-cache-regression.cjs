@@ -165,6 +165,15 @@ async function testMissingUserDisablesPersistentCache() {
   assert.equal(miss, undefined);
 }
 
+async function testPersistentStaleSnapshotCannotOverwriteFreshRecord() {
+  const storage = createStorage();
+  reset(storage);
+  await persistent.setPersistentConversationSnapshot({ ...snapshot(7, "fresh"), snapshotVersion: "10", updatedAt: 10_000 });
+  await persistent.setPersistentConversationSnapshot({ ...snapshot(7, "stale"), snapshotVersion: "9", updatedAt: 9_000 });
+  const hit = await persistent.getPersistentConversationSnapshot(7);
+  assert.equal(hit.messages[0].content, "fresh");
+}
+
 (async () => {
   await testSetGetRehydratesMemoryAndClones();
   await testExpiryDeletesRecord();
@@ -172,6 +181,7 @@ async function testMissingUserDisablesPersistentCache() {
   await testDeleteAndClear();
   await testUserScopeIsolation();
   await testMissingUserDisablesPersistentCache();
+  await testPersistentStaleSnapshotCannotOverwriteFreshRecord();
   persistent.configurePersistentConversationSnapshotStorageForTests(undefined);
   console.log("chat conversation persistent cache regression passed");
 })();

@@ -57,6 +57,24 @@ function isExpired(record: PersistentConversationSnapshotRecord, now = nowMs()):
   return now - record.updatedAt > ttlMs;
 }
 
+function parseSnapshotVersionNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return 0;
+  const parsed = Number(value.replace(/^[^\d.-]+/, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isIncomingPersistentSnapshotStale(current: PersistentConversationSnapshotRecord | undefined, incoming: Pick<CachedConversationSnapshot, "snapshotVersion" | "updatedAt">): boolean {
+  if (!current) return false;
+  const currentVersion = parseSnapshotVersionNumber(current.snapshotVersion);
+  const incomingVersion = parseSnapshotVersionNumber(incoming.snapshotVersion);
+  if (incomingVersion > 0 || currentVersion > 0) {
+    if (incomingVersion < currentVersion) return true;
+    if (incomingVersion > currentVersion) return false;
+  }
+  return typeof incoming.updatedAt === "number" && typeof current.updatedAt === "number" && incoming.updatedAt < current.updatedAt;
+}
+
 function serializeSnapshot(snapshot: CachedConversationSnapshot, ownerKey: string): PersistentConversationSnapshotRecord {
   return {
     ...snapshot,
@@ -212,6 +230,9 @@ export async function setPersistentConversationSnapshot(snapshot: CachedConversa
   const ownerKey = resolvePersistentConversationOwnerKey();
   if (!ownerKey) return;
   try {
+    const cacheKey = buildPersistentConversationCacheKey(ownerKey, snapshot.conversationId);
+    const current = await store.get(cacheKey);
+    if (current && !isExpired(current) && isIncomingPersistentSnapshotStale(current, snapshot)) return;
     await store.set(serializeSnapshot({ ...snapshot, updatedAt: nowMs() }, ownerKey));
     await prunePersistentConversationSnapshots();
   } catch {

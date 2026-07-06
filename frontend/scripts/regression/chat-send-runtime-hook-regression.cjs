@@ -49,6 +49,12 @@ let createConversationRequestImpl = async () => ({ id: 42, title: "created" });
 let realtimeGetImpl = () => undefined;
 let uuidCounter = 0;
 const events = [];
+const chatRuntimeStoreCalls = [];
+const chatRuntimeStoreMock = {
+  patchConversation: (...args) => chatRuntimeStoreCalls.push(["patchConversation", ...args]),
+  deleteConversation: (...args) => chatRuntimeStoreCalls.push(["deleteConversation", ...args]),
+  setActiveConversation: (...args) => chatRuntimeStoreCalls.push(["setActiveConversation", ...args]),
+};
 global.fetch = async () => ({ ok: true, body: null });
 
 const moduleCache = new Map();
@@ -62,6 +68,7 @@ function loadModule(file) {
     if (specifier === "uuid") return { v4: () => `uuid-${++uuidCounter}` };
     if (specifier === "@/lib/guestId") return { getGuestId: () => "guest-id" };
     if (specifier === "@/lib/streaming") return { realtimeGet: (...args) => realtimeGetImpl(...args) };
+    if (specifier === "@/lib/chatRuntime") return { chatRuntimeStore: chatRuntimeStoreMock };
     if (specifier === "@/lib/chatCompareRunCoordinator") return { runCompareModels: (...args) => compareRunImpl(...args) };
     if (specifier === "@/lib/chatCompareInitCoordinator") return { initCompareRun: (...args) => compareInitImpl(...args) };
     if (specifier === "@/lib/chatSingleSendCoordinator") {

@@ -115,6 +115,20 @@ function testPatchAndEquivalence() {
   );
 }
 
+function testStaleSnapshotCannotOverwriteNewerCacheEntry() {
+  reset();
+  cache.setConversationSnapshot({ ...snapshot(7, "fresh"), snapshotVersion: "10", updatedAt: 10_000 });
+  cache.setConversationSnapshot({ ...snapshot(7, "stale"), snapshotVersion: "9", updatedAt: 9_000 });
+  assert.equal(cache.getConversationSnapshot(7).messages[0].content, "fresh");
+}
+
+function testStalePatchCannotOverwriteNewerCacheEntry() {
+  reset();
+  cache.setConversationSnapshot({ ...snapshot(8, "fresh"), snapshotVersion: "10", updatedAt: 10_000 });
+  cache.patchConversationSnapshot(8, { messages: snapshot(8, "stale").messages, snapshotVersion: "9", updatedAt: 9_000 });
+  assert.equal(cache.getConversationSnapshot(8).messages[0].content, "fresh");
+}
+
 (async () => {
   testDefaultConfig();
   testHitReturnsClone();
@@ -123,6 +137,8 @@ function testPatchAndEquivalence() {
   await testSlidingTtlTouchesUpdatedAt();
   testLruEvictionAndTouch();
   testPatchAndEquivalence();
+  testStaleSnapshotCannotOverwriteNewerCacheEntry();
+  testStalePatchCannotOverwriteNewerCacheEntry();
   reset();
   console.log("chat conversation cache regression passed");
 })();

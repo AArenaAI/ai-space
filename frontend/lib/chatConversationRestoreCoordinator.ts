@@ -7,6 +7,7 @@ import {
 } from "./chatForkCoordinator";
 import { mergeConversationSnapshot } from "./chatConversationSnapshotMerge";
 import { buildChatBootstrapUrl, defaultBootstrapSleep, type ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
+import { apiFetch } from "@/lib/api/client";
 
 export type ConversationRestoreResponse = {
   notModified?: boolean;
@@ -158,11 +159,17 @@ export async function fetchConversationRestore({
   const url = buildChatBootstrapUrl({ apiBaseUrl, conversationId, messageTail: DEFAULT_CONVERSATION_RESTORE_TAIL, conversationLimit: 30 });
   let attempt = 0;
   for (;;) {
-    const res = await fetchImpl(url, {
+    const isBrowserSameOriginApi = typeof window !== "undefined"
+      && fetchImpl === fetch
+      && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+    const requestInit: RequestInit = {
       headers,
       credentials: "include",
       signal,
-    });
+    };
+    const res = isBrowserSameOriginApi
+      ? await apiFetch(`/chat/bootstrap${url.includes("?") ? `?${url.split("?")[1]}` : ""}`, requestInit)
+      : await fetchImpl(url, requestInit);
     if (res.status === 304) return { notModified: true, snapshot_version: snapshotVersion };
     if (res.status === 429 && retry429 && attempt < max429Retries && !signal?.aborted) {
       attempt += 1;
@@ -207,10 +214,13 @@ export async function fetchConversationMessageStatus({
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<ConversationRestoreStatusResponse | undefined> {
-  const res = await fetchImpl(buildConversationMessageStatusUrl({ apiBaseUrl, conversationId, serverMessageId }), {
-    headers: { Authorization: `Bearer ${token}` },
-    signal,
-  });
+  const headers = { Authorization: `Bearer ${token}` };
+  const isBrowserSameOriginApi = typeof window !== "undefined"
+    && fetchImpl === fetch
+    && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+  const res = isBrowserSameOriginApi
+    ? await apiFetch(`/conversations/${conversationId}/messages/${serverMessageId}`, { headers, signal })
+    : await fetchImpl(buildConversationMessageStatusUrl({ apiBaseUrl, conversationId, serverMessageId }), { headers, credentials: "include", signal });
   return res.ok ? await res.json() : undefined;
 }
 
@@ -227,10 +237,13 @@ export async function fetchConversationMessageCount({
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<number | undefined> {
-  const res = await fetchImpl(buildConversationMessageCountUrl({ apiBaseUrl, conversationId }), {
-    headers: { Authorization: `Bearer ${token}` },
-    signal,
-  });
+  const headers = { Authorization: `Bearer ${token}` };
+  const isBrowserSameOriginApi = typeof window !== "undefined"
+    && fetchImpl === fetch
+    && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+  const res = isBrowserSameOriginApi
+    ? await apiFetch(`/conversations/${conversationId}/messages?limit=1`, { headers, signal })
+    : await fetchImpl(buildConversationMessageCountUrl({ apiBaseUrl, conversationId }), { headers, credentials: "include", signal });
   if (!res.ok) return undefined;
   const data = await res.json();
   return typeof data?.total === "number" ? data.total : undefined;

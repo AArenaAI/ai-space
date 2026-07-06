@@ -51,6 +51,7 @@ function loadModule(file) {
         fetchConversationRestore: (...args) => restoreImpl(...args),
         fetchConversationMessageStatus: (...args) => statusImpl(...args),
         fetchConversationMessageCount: (...args) => countImpl(...args),
+        buildConversationRestoreMergeDecision: () => ({ accepted: true }),
         buildConversationRestoreState: ({ data }) => {
           if (data.noState) return undefined;
           const loadedMessages = (data.messages || []).map((m) => ({
@@ -209,9 +210,7 @@ async function testLoadExistingRestoresStateAndCounts() {
   statusImpl = async () => undefined;
   countImpl = async () => 88;
   const { state, lifecycle } = runRuntime({ conversationId: 9, token: "tok" });
-  await flush();
-  await flush();
-  await flush();
+  for (let i = 0; i < 8 && state.calls.find((c) => c[0] === "title")?.[1] !== "T"; i += 1) await flush();
   assert.equal(lifecycle[0][0], "load");
   assert.equal(state.calls.find((c) => c[0] === "title")?.[1], "T");
   assert.equal(state.messages[0].serverMessageId, 12);

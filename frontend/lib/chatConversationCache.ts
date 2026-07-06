@@ -53,6 +53,24 @@ function isExpired(snapshot: CachedConversationSnapshot, now = nowMs()): boolean
   return now - snapshot.updatedAt > ttlMs;
 }
 
+function parseSnapshotVersionNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return 0;
+  const parsed = Number(value.replace(/^[^\d.-]+/, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isIncomingSnapshotStale(current: CachedConversationSnapshot | undefined, incoming: Pick<CachedConversationSnapshot, "snapshotVersion" | "updatedAt">): boolean {
+  if (!current) return false;
+  const currentVersion = parseSnapshotVersionNumber(current.snapshotVersion);
+  const incomingVersion = parseSnapshotVersionNumber(incoming.snapshotVersion);
+  if (incomingVersion > 0 || currentVersion > 0) {
+    if (incomingVersion < currentVersion) return true;
+    if (incomingVersion > currentVersion) return false;
+  }
+  return typeof incoming.updatedAt === "number" && typeof current.updatedAt === "number" && incoming.updatedAt < current.updatedAt;
+}
+
 function evictExpired(now = nowMs()) {
   Array.from(snapshots.entries()).forEach(([conversationId, snapshot]) => {
     if (isExpired(snapshot, now)) snapshots.delete(conversationId);
@@ -111,6 +129,8 @@ export function getConversationSnapshotCacheConfig(): { maxEntries: number; ttlM
 
 export function setConversationSnapshot(snapshot: CachedConversationSnapshot) {
   evictExpired();
+  const current = snapshots.get(snapshot.conversationId);
+  if (current && !isExpired(current) && isIncomingSnapshotStale(current, snapshot)) return;
   snapshots.delete(snapshot.conversationId);
   snapshots.set(snapshot.conversationId, cloneSnapshot({ ...snapshot, updatedAt: nowMs() }));
   evictLru();

@@ -1,5 +1,3 @@
-import { apiFetch } from "@/lib/api/client";
-
 export type CreateConversationBody = {
   title: string;
   model: string;
@@ -56,7 +54,7 @@ export async function runCreateConversationRequest(input: {
     body: JSON.stringify(input.body),
   };
   const res = isBrowserSameOriginApi
-    ? await apiFetch("/conversations", requestInit)
+    ? await import("@/lib/api/client").then(({ apiFetch }) => apiFetch("/conversations", requestInit))
     : await fetcher(buildCreateConversationUrl(input.apiBaseUrl), { ...requestInit, credentials: "include" });
 
   if (!res.ok) {

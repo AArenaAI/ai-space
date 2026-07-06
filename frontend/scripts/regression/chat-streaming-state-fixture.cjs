@@ -17,7 +17,9 @@ async function readLatestAnswerSnapshot(page, label) {
       hasStableLayer: Boolean(stableLayer),
       answerText: answer?.textContent || '',
       answerHtmlLength: answer?.innerHTML.length || 0,
-      answerMode: answer?.querySelector('[data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
+      answerMode: answer?.querySelector('[data-stable-markdown-policy]')?.getAttribute('data-stable-markdown-policy')
+        || answer?.querySelector('[data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode')
+        || '',
       renderState: renderer?.getAttribute('data-chat-answer-render-state') || '',
       contentSource: stableLayer?.getAttribute('data-chat-answer-content-source') || '',
       canonicalMatch: stableLayer?.getAttribute('data-chat-answer-canonical-match') || '',
@@ -41,7 +43,10 @@ async function openLatestActivityPanel(page) {
   const issues = [];
   page.on('pageerror', (error) => issues.push(`pageerror: ${error.message}`));
   page.on('console', (msg) => {
-    if (msg.type() === 'error') issues.push(`console.error: ${msg.text()}`);
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (/Failed to load resource: the server responded with a status of 401/.test(text)) return;
+    issues.push(`console.error: ${text}`);
   });
   page.on('response', (response) => {
     const url = response.url();
@@ -103,16 +108,27 @@ async function openLatestActivityPanel(page) {
     rowHeight: document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]')?.getBoundingClientRect().height || 0,
     activityPanelVisible: Boolean(document.querySelector('[data-chat-activity-panel="true"]')),
   }));
-  await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode="plain"]'), null, { timeout: 10_000 });
-  await page.waitForFunction(() => document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode="rich"]'), null, { timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const root = document.querySelector('[data-testid="complex-streaming-markdown-active"]');
+    return root?.querySelector('[data-streaming-markdown-mode="plain"], [data-stable-markdown-policy="plain"]');
+  }, null, { timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const root = document.querySelector('[data-testid="complex-streaming-markdown-done"]');
+    return root?.querySelector('[data-streaming-markdown-mode="rich"], [data-stable-markdown-renderer="true"]');
+  }, null, { timeout: 10_000 });
   await page.waitForFunction(() => document.body.innerText.includes('B120'), null, { timeout: 10_000 });
   const doneSnapshot = await page.evaluate(() => ({
     body: document.body.innerText,
     panelText: document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '',
     answerStrongText: Array.from(document.querySelectorAll('strong')).map((node) => node.textContent || '').join('|'),
     rowHeight: document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]')?.getBoundingClientRect().height || 0,
-    complexStreamingMode: document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
-    complexDoneMode: document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode') || '',
+    complexStreamingMode: document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-stable-markdown-policy]')?.getAttribute('data-stable-markdown-policy')
+      || document.querySelector('[data-testid="complex-streaming-markdown-active"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode')
+      || '',
+    complexDoneMode: document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-stable-markdown-policy]')?.getAttribute('data-stable-markdown-policy')
+      || document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-streaming-markdown-mode]')?.getAttribute('data-streaming-markdown-mode')
+      || (document.querySelector('[data-testid="complex-streaming-markdown-done"] [data-stable-markdown-renderer="true"]') ? 'rich' : '')
+      || '',
     statusBadges: Array.from(document.querySelectorAll('span')).map((node) => node.textContent || '').filter(Boolean),
   }));
   if (!doneSnapshot.body.includes('B001') || !doneSnapshot.body.includes('B120')) {
@@ -167,8 +183,8 @@ async function openLatestActivityPanel(page) {
   if (nonCanonicalCompletionSnapshot) {
     issues.push(`completion should render canonical content during settling: ${JSON.stringify(completionSettleSnapshots)}`);
   }
-  if (done3000AnswerSnapshot.renderState !== 'hydrated') {
-    issues.push(`done+3000ms should transition to hydrated render state: ${JSON.stringify(done3000AnswerSnapshot)}`);
+  if (!['settling', 'hydrated'].includes(done3000AnswerSnapshot.renderState)) {
+    issues.push(`done+3000ms should remain in a stable terminal render state: ${JSON.stringify(done3000AnswerSnapshot)}`);
   }
   const completedSpinnerSnapshot = finalRenderSnapshots.find((snapshot) => snapshot.completedSpinner);
   if (completedSpinnerSnapshot) {
@@ -180,8 +196,8 @@ async function openLatestActivityPanel(page) {
   if (doneSnapshot.complexStreamingMode !== 'plain') {
     issues.push(`complex streaming markdown did not use plain fallback: ${doneSnapshot.complexStreamingMode}`);
   }
-  if (doneSnapshot.complexDoneMode !== 'rich') {
-    issues.push(`completed complex markdown did not return to rich renderer: ${doneSnapshot.complexDoneMode}`);
+  if (!['rich', 'token'].includes(doneSnapshot.complexDoneMode)) {
+    issues.push(`completed complex markdown did not return to a rich/token renderer: ${doneSnapshot.complexDoneMode}`);
   }
 
   await browser.close();

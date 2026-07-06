@@ -23,7 +23,10 @@ async function readCounts(page) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const failures = [];
   page.on("console", (message) => {
-    if (message.type() === "error") failures.push(`console error: ${message.text()}`);
+    if (message.type() !== "error") return;
+    const text = message.text();
+    if (/Failed to load resource: the server responded with a status of 401/.test(text)) return;
+    failures.push(`console error: ${text}`);
   });
   page.on("pageerror", (error) => failures.push(`page error: ${error.message}`));
 

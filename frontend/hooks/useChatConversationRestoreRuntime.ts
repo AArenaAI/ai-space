@@ -107,11 +107,12 @@ type ApplyCachedSnapshotOptions = {
   setIsLoadingHistory: Dispatch<SetStateAction<boolean>>;
 };
 
-function getAssistantDedupKey(message: Message): string | undefined {
-  if (message.role !== "assistant") return undefined;
-  if (message.serverMessageId) return `server:${message.serverMessageId}`;
-  if (message.generationTaskId) return `task:${message.generationTaskId}`;
-  return undefined;
+function getMessageDedupKeys(message: Message): string[] {
+  const keys: string[] = [];
+  if (message.id) keys.push(`id:${message.id}`);
+  if (message.serverMessageId) keys.push(`server:${message.serverMessageId}`);
+  if (message.role === "assistant" && message.generationTaskId) keys.push(`task:${message.generationTaskId}`);
+  return keys;
 }
 
 function shouldPreferDedupCandidate(candidate: Message, existing: Message): boolean {
@@ -142,20 +143,22 @@ function dedupeConversationMessages(messages: Message[]): Message[] {
   const result: Message[] = [];
   const seen = new Map<string, number>();
   messages.forEach((message) => {
-    const key = getAssistantDedupKey(message);
-    if (!key) {
+    const keys = getMessageDedupKeys(message);
+    if (keys.length === 0) {
       result.push(message);
       return;
     }
-    const existingIndex = seen.get(key);
+    const existingIndex = keys.map((key) => seen.get(key)).find((index): index is number => index !== undefined);
     if (existingIndex === undefined) {
-      seen.set(key, result.length);
+      const nextIndex = result.length;
+      keys.forEach((key) => seen.set(key, nextIndex));
       result.push(message);
       return;
     }
     if (shouldPreferDedupCandidate(message, result[existingIndex])) {
       result[existingIndex] = message;
     }
+    keys.forEach((key) => seen.set(key, existingIndex));
   });
   return result;
 }
@@ -187,10 +190,23 @@ function getMessageCreatedAt(message: Message): number {
   return Number.isFinite(createdAt) ? createdAt : 0;
 }
 
+function sortMessagesByCreatedAtWhenAvailable(messages: Message[]): Message[] {
+  return messages
+    .map((message, index) => ({ message, index, createdAt: getMessageCreatedAt(message) }))
+    .sort((left, right) => {
+      if (!left.createdAt || !right.createdAt || left.createdAt === right.createdAt) return left.index - right.index;
+      return left.createdAt - right.createdAt;
+    })
+    .map((entry) => entry.message);
+}
+
 function mergeFreshLocalMessagesIntoRestore(previous: Message[], restored: Message[]): Message[] {
   if (!previous.length || !restored.length) return restored;
   const latestRestoredCreatedAt = restored.reduce((latest, message) => Math.max(latest, getMessageCreatedAt(message)), 0);
+  const restoredKeys = new Set(restored.map(getMessageMergeKey));
   const freshLocalMessages = previous.filter((message) => {
+    const mergeKey = getMessageMergeKey(message);
+    if (restoredKeys.has(mergeKey)) return false;
     const createdAt = getMessageCreatedAt(message);
     if (!createdAt || createdAt < latestRestoredCreatedAt - 1000) return false;
     return message.role === "user" || message.role === "assistant";
@@ -198,7 +214,7 @@ function mergeFreshLocalMessagesIntoRestore(previous: Message[], restored: Messa
   if (freshLocalMessages.length === 0) return restored;
   const freshKeys = new Set(freshLocalMessages.map(getMessageMergeKey));
   const restoredWithoutFresh = restored.filter((message) => !freshKeys.has(getMessageMergeKey(message)));
-  return [...restoredWithoutFresh, ...freshLocalMessages];
+  return sortMessagesByCreatedAtWhenAvailable([...restoredWithoutFresh, ...freshLocalMessages]);
 }
 
 function applyCachedSnapshot({
@@ -698,7 +714,8 @@ export function useChatConversationRestoreRuntime({
           }
           setMessages((prev) => {
             const restoredMessages = dedupeConversationMessages(mergePendingMessages(prev) as Message[]);
-            const nextMessages = reuseStableMessageObjects(prev, mergeFreshLocalMessagesIntoRestore(prev, restoredMessages));
+            const mergedWithFreshLocal = dedupeConversationMessages(mergeFreshLocalMessagesIntoRestore(prev, restoredMessages));
+            const nextMessages = reuseStableMessageObjects(prev, mergedWithFreshLocal);
             mergedMessages = nextMessages;
             return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
           });

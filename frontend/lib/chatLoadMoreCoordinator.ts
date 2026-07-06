@@ -79,9 +79,13 @@ export async function fetchLoadMoreMessages({
   page: Pick<LoadMorePage, "requestLimit" | "offset">;
   fetchImpl?: typeof fetch;
 }): Promise<LoadMoreResponse | undefined> {
-  const res = await fetchImpl(buildLoadMoreMessagesUrl({ apiBaseUrl, conversationId, page }), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const headers = { Authorization: `Bearer ${token}` };
+  const isBrowserSameOriginApi = typeof window !== "undefined"
+    && fetchImpl === fetch
+    && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+  const res = isBrowserSameOriginApi
+    ? await import("@/lib/api/client").then(({ apiFetch }) => apiFetch(`/conversations/${conversationId}/messages?limit=${page.requestLimit}&offset=${page.offset}`, { headers }))
+    : await fetchImpl(buildLoadMoreMessagesUrl({ apiBaseUrl, conversationId, page }), { headers, credentials: "include" });
   if (!res.ok) return undefined;
   return await res.json();
 }
