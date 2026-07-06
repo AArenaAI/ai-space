@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, memo } from "react";
 import {
-  User, Bot, Copy, Check, MoreHorizontal, Trash2, RotateCcw, Share2, X, SquareCheck,
+  User, Bot, Copy, Check, MoreHorizontal, RotateCcw, Share2, X, SquareCheck,
   Play, FileText, Star, Columns2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -42,7 +42,6 @@ function WaveText({ text, className }: { text: string; className?: string }) {
 
 function MessageMenu({
   onCopy,
-  onDelete,
   onRegenerate,
   onSelectMode,
   onFavorite,
@@ -50,7 +49,6 @@ function MessageMenu({
   showRegenerate,
 }: {
   onCopy: () => void;
-  onDelete: () => void;
   onRegenerate?: () => void;
   onSelectMode: () => void;
   onFavorite?: () => void;
@@ -116,14 +114,6 @@ function MessageMenu({
                 {isFavorited ? t("chat.action.unfavorite") : t("chat.action.favorite")}
               </button>
             )}
-            <div className="mx-2 my-1 h-px bg-surface-border" />
-            <button
-              onClick={() => { onDelete(); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              {t("chat.action.delete")}
-            </button>
           </div>
         </>
       )}
@@ -133,7 +123,6 @@ function MessageMenu({
 
 function MessageActions({
   onCopy,
-  onDelete,
   onRegenerate,
   onSelectMode,
   onFavorite,
@@ -146,7 +135,6 @@ function MessageActions({
   onForkCompare,
 }: {
   onCopy: () => void;
-  onDelete: () => void;
   onRegenerate?: () => void;
   onSelectMode: () => void;
   onFavorite?: () => void;
@@ -247,13 +235,6 @@ function MessageActions({
           <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400")} />
         </button>
       )}
-      <button
-        onClick={onDelete}
-        className="p-1 rounded-md text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        title={t("chat.action.delete")}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
       <div className="relative" ref={moreRef}>
         <button
           onClick={() => setMoreOpen(!moreOpen)}
@@ -309,7 +290,6 @@ export interface ChatMessageItemProps {
   conversationId?: number;
   isFavorited: boolean;
   onToggleSelect: (index: number) => void;
-  onDelete: (id: string) => void;
   onCopy: (content: string) => void;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
@@ -333,7 +313,6 @@ function ChatMessageItemRaw({
   conversationId,
   isFavorited,
   onToggleSelect,
-  onDelete,
   onCopy,
   onRegenerate,
   onContinueGenerate,
@@ -352,10 +331,6 @@ function ChatMessageItemRaw({
   const handleCopy = useCallback(() => {
     onCopy(msg.content || "");
   }, [onCopy, msg.content]);
-
-  const handleDelete = useCallback(() => {
-    onDelete(msg.id);
-  }, [onDelete, msg.id]);
 
   const handleFavorite = useCallback(() => {
     if (msg.serverMessageId && conversationId) {
@@ -506,7 +481,6 @@ function ChatMessageItemRaw({
           {!selectMode && !isStreaming && (
             <MessageActions
               onCopy={handleCopy}
-              onDelete={handleDelete}
               onRegenerate={onRegenerate}
               onSelectMode={onEnterSelectMode}
               onFavorite={!isUser && msg.serverMessageId && conversationId ? handleFavorite : undefined}

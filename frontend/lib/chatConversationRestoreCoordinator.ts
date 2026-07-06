@@ -58,6 +58,19 @@ export function hasCompletedLastAssistantStatus(statusData?: ConversationRestore
   return status === "completed" && content.trim().length > 0;
 }
 
+export function isTerminalGenerationStatus(status?: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+}
+
+export function hasTerminalLastAssistantStatus(statusData?: ConversationRestoreStatusResponse): boolean {
+  return isTerminalGenerationStatus(statusData?.background_task?.status || "");
+}
+
+function isTerminalRestoreMessage(message: ConversationRestoreMessage): boolean {
+  if (message.completedAt || message.stopped || message.errorCode) return true;
+  return isTerminalGenerationStatus(message.serverGenerationStatus);
+}
+
 export type ConversationRestoreStatusDecision = {
   hasTask: boolean;
   status: string;
@@ -247,6 +260,7 @@ export function mergeActiveTaskStreamsIntoMessages(
     if (message.role !== "assistant") return message;
     const active = activeByServerMessageId.get(String(message.serverMessageId || message.id));
     if (!active) return message;
+    if (isTerminalRestoreMessage(message)) return message;
     return {
       ...message,
       id: active.localId,
@@ -283,11 +297,16 @@ export function buildConversationRestoreState({
   if (!data.messages) return undefined;
   const loadedMessages = mapConversationRestoreMessages(data.messages, { fallbackId, parseTime });
   const activeByServerMessageId = buildActiveTaskStreamsByServerMessageId(activeEntries, conversationId);
+  for (const message of loadedMessages) {
+    if (message.role === "assistant" && message.serverMessageId && isTerminalRestoreMessage(message)) {
+      activeByServerMessageId.delete(String(message.serverMessageId));
+    }
+  }
   let mergedMessages = mergeActiveTaskStreamsIntoMessages(loadedMessages, activeByServerMessageId, activeActivityStatus);
   const statusData = data.last_assistant_status;
   const bgTask = statusData?.background_task;
   const status = bgTask?.status || "";
-  const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+  const terminalStatus = isTerminalGenerationStatus(status);
   const statusContent = statusData?.message?.content || "";
   const statusServerMessageId = Number(statusData?.message?.id || bgTask?.assistant_message_id || 0) || undefined;
   const shouldAppendPendingStatusAssistant =
@@ -352,11 +371,11 @@ export function buildConversationStatusDecision({
   const bgTask = statusData?.background_task || {};
   const hasTask = !!bgTask.id || !!bgTask.task_id || !!bgTask.status;
   const status = bgTask.status || "";
-  const terminalStatus = status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+  const terminalStatus = isTerminalGenerationStatus(status);
   const serverContent = statusData?.message?.content || "";
   const serverReasoningContent = statusData?.message?.reasoning_content || statusData?.message?.reasoning || statusData?.message?.thinking || "";
   const hasContent = serverContent.trim().length > 0;
-  const shouldResumePolling = hasTask && (!terminalStatus || !hasContent);
+  const shouldResumePolling = hasTask && !terminalStatus;
   const generationTaskId = Number(bgTask.id || bgTask.task_id || 0) || undefined;
   const lastSequence = Number(bgTask.last_sequence_number || 0) || 0;
   const currentMessageSequence = currentMessage.lastSequence || 0;
@@ -366,7 +385,7 @@ export function buildConversationStatusDecision({
   } as ForkChatPersistedMessage);
   const completedAt = shouldResumePolling
     ? undefined
-    : (hasTask && terminalStatus && hasContent && !currentMessage.completedAt
+    : (hasTask && terminalStatus && !currentMessage.completedAt
       ? (bgTask.completed_at ? parseTime(bgTask.completed_at) : now)
       : currentMessage.completedAt);
   const patch: Partial<ConversationRestoreMessage> = {

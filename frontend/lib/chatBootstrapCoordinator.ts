@@ -1,6 +1,7 @@
 import type { ChatModel, Conversation } from "@/lib/chatTypes";
 import type { ConversationRestoreStatusResponse } from "@/lib/chatConversationRestoreCoordinator";
 import type { ForkChatPersistedMessage } from "@/lib/chatForkCoordinator";
+import { apiFetch } from "@/lib/api/client";
 
 export type ChatBootstrapWorkspace = {
   current_id?: number;
@@ -167,11 +168,17 @@ export async function fetchChatBootstrap({
   const task = (async () => {
     let attempt = 0;
     for (;;) {
-      const res = await fetchImpl(url, {
+      const isBrowserSameOriginApi = typeof window !== "undefined"
+        && fetchImpl === fetch
+        && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+      const requestInit: RequestInit = {
         headers,
         credentials: "include",
         signal,
-      });
+      };
+      const res = isBrowserSameOriginApi
+        ? await apiFetch(`/chat/bootstrap${url.includes("?") ? `?${url.split("?")[1]}` : ""}`, requestInit)
+        : await fetchImpl(url, requestInit);
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) return { auth_status: "anonymous", ...data } as ChatBootstrapPayload;
       if (res.status === 429 && retry429 && attempt < max429Retries && !signal?.aborted) {

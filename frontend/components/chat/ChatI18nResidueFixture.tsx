@@ -120,7 +120,6 @@ function ChatI18nResidueFixtureInner() {
           <AssistantMessageMeta msg={assistant} model={model} isStreaming={false} />
           <MessageActions
             onCopy={() => undefined}
-            onDelete={() => undefined}
             onRegenerate={() => undefined}
             onShareSelectMode={() => undefined}
             onFavoriteSelectMode={() => undefined}
@@ -162,7 +161,7 @@ function ChatI18nResidueFixtureInner() {
         <section className="rounded-2xl border border-surface-border bg-surface-card p-4" data-testid="fixture-input-attachments">
           <div className="mb-2 text-sm font-medium text-text-secondary">Attachment error chips</div>
           <MessageInput
-            onSend={() => undefined}
+            onSend={() => ({ accepted: true })}
             onStop={() => undefined}
             isLoading={false}
             compareMode={false}

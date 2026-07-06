@@ -169,7 +169,7 @@ export function AssistantMessageContent({
   }
 
   if (generating && !realtimeHasVisiblePayload && !runtimeState.content) {
-    return <AssistantPendingShell label="正在生成回答" detail={message.isComplexTask ? "后台保持进度" : undefined} />;
+    return <AssistantPendingShell />;
   }
 
   if (!shouldRenderStreamingText && !runtimeState.content) {

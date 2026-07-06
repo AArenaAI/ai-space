@@ -2,14 +2,13 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Columns3, Copy, MoreHorizontal, RotateCcw, Share2, Star, StickyNote, Trash2 } from "lucide-react";
+import { Check, Columns3, Copy, MoreHorizontal, RotateCcw, Share2, Star, StickyNote } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 export type MessageActionsProps = {
   onCopy: () => void;
-  onDelete: () => void;
   onRegenerate?: () => void;
   onShareSelectMode: () => void;
   onFavoriteSelectMode?: () => void;
@@ -30,14 +29,6 @@ function formatTime(ts: number, language: string) {
   const timeStr = d.toLocaleTimeString(language, { hour: "2-digit", minute: "2-digit" });
   if (isToday) return timeStr;
   return `${d.toLocaleDateString(language, { month: "short", day: "numeric" })} ${timeStr}`;
-}
-
-function formatDuration(ms: number, t: (key: string, params?: Record<string, string>) => string) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes > 0) return t("time.duration.minutesSeconds", { minutes: String(minutes), seconds: String(seconds) });
-  return t("time.duration.seconds", { seconds: String(seconds) });
 }
 
 function nowMs() {
@@ -84,7 +75,6 @@ function MessageActionsProfileProbe({
 
 function MessageActions({
   onCopy,
-  onDelete,
   onRegenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
@@ -93,7 +83,6 @@ function MessageActions({
   align,
   visible,
   createdAt,
-  completedAt,
   onForkCompare,
   onSaveToNote,
 }: MessageActionsProps) {
@@ -133,8 +122,6 @@ function MessageActions({
     }
     setMoreOpen(true);
   };
-
-  const durationMs = completedAt ? completedAt - createdAt : 0;
 
   return (
     <div data-message-actions="true" className={cn(
@@ -204,13 +191,6 @@ function MessageActions({
           <Star className={cn("w-3.5 h-3.5", isFavorited && "fill-amber-400")} />
         </button>
       )}
-      <button
-        onClick={onDelete}
-        className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-500/10 transition-colors"
-        title={t("chat.action.delete")}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
       <div className="relative" ref={moreRef}>
         <button
           onClick={(event) => {
@@ -246,12 +226,6 @@ function MessageActions({
                     <StickyNote className="h-3.5 w-3.5" />
                     保存到笔记
                   </button>
-                )}
-                {completedAt && durationMs >= 0 && (
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-text-tertiary">{t("chat.action.duration")}</span>
-                    <span className="text-text-secondary">{formatDuration(durationMs, t)}</span>
-                  </div>
                 )}
               </div>
             </div>

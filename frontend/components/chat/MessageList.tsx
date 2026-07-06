@@ -41,7 +41,6 @@ import ChatSelectionOverlays from "./ChatSelectionOverlays";
 import ChatScrollToBottomButton from "./ChatScrollToBottomButton";
 import ChatHistoryLoadingState from "./ChatHistoryLoadingState";
 import ChatEmptyState from "./ChatEmptyState";
-import ChatDeleteMessageDialog from "./ChatDeleteMessageDialog";
 import ChatActivityPanel from "./ChatActivityPanel";
 import { useCompareActivityLayout, type CompareActivityLayout } from "./ChatCompareActivityLayoutControl";
 import { CHAT_ACTIVITY_PANEL_WIDTH_CLASS } from "./chatLayout";
@@ -78,7 +77,6 @@ interface MessageListProps {
   isComplexTask?: boolean;
   models: ChatModel[];
   conversationId?: number;
-  onDeleteMessage?: (id: string) => void;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
   isCompare?: boolean;
@@ -90,6 +88,7 @@ interface MessageListProps {
   onExampleClick?: (prompt: string) => void;
   groupViews?: Map<number, number>;
   switchGroupModel?: (groupId: number, activeIndex: number) => void;
+  onRetryCompareColumn?: (assistant: Message, userMessage: Message) => void | Promise<void>;
   onForkCompare?: (messageId: number) => void;
   isLoadingMore?: boolean;
   hasMoreMessages?: boolean;
@@ -185,7 +184,6 @@ function MessageList({
   isComplexTask = false,
   models,
   conversationId,
-  onDeleteMessage,
   onRegenerate,
   onContinueGenerate,
   isCompare = false,
@@ -197,6 +195,7 @@ function MessageList({
   onExampleClick,
   groupViews,
   switchGroupModel,
+  onRetryCompareColumn,
   onForkCompare,
   isLoadingMore,
   hasMoreMessages,
@@ -914,7 +913,6 @@ function MessageList({
     }
   }, [isCompare, markUserBrowsing, stopBottomLockForUserBrowse]);
 
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState<SelectionMode | null>(null);
   const selectMode = selectionMode !== null;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1653,14 +1651,18 @@ function MessageList({
     previousMessageEdgeRef.current = { length: messages.length, firstId, lastId };
   }, [isRestoringBrowsePositionNow, messages, scrollToBottom]);
 
-  const handleCopy = useCallback((content: string) => {
-    navigator.clipboard.writeText(content);
-  }, []);
-
   const copyText = useCallback(async (content: string, successMessage = t("chat.toast.copied")) => {
-    await navigator.clipboard.writeText(content);
-    toast.success(successMessage);
+    try {
+      await navigator.clipboard.writeText(content);
+      toast.success(successMessage);
+    } catch {
+      toast.error(t("chat.toast.copyFailed"));
+    }
   }, [t]);
+
+  const handleCopy = useCallback((content: string) => {
+    void copyText(content, t("chat.toast.copied"));
+  }, [copyText, t]);
 
   const formatQuoteText = useCallback((content: string) => {
     return content
@@ -2046,12 +2048,12 @@ function MessageList({
                   imageLoadFailedLabel={t("chat.imageLoadFailed")}
                   MarkdownRenderer={LazyMarkdownRenderer}
                   onCopy={handleCopy}
-                  onDelete={setDeleteTarget}
                   onRegenerate={onRegenerate}
                   onContinueGenerate={onContinueGenerate}
                   onShareSelectMode={(id) => enterSelectMode("share", id)}
                   onFavoriteSelectMode={(id) => enterSelectMode("favorite", id)}
                   isFavorited={isFavorited}
+                  onRetryColumn={onRetryCompareColumn}
                   onForkCompare={onForkCompare}
                   onSaveToNote={onSaveAssistantToNote}
                   onAssistantViewed={handleAssistantViewed}
@@ -2115,15 +2117,6 @@ function MessageList({
           onDownloadImage={handleDownloadImage}
         />
 
-        <ChatDeleteMessageDialog
-          targetId={deleteTarget}
-          title={t("chat.deleteMessageTitle")}
-          description={t("chat.deleteMessageDesc")}
-          confirmText={t("common.delete")}
-          cancelText={t("common.cancel")}
-          onDelete={onDeleteMessage}
-          onClose={() => setDeleteTarget(null)}
-        />
       </div>
     );
   }
@@ -2223,7 +2216,6 @@ function MessageList({
                 switchGroupModel={switchGroupModel}
                 toggleSelect={toggleSelect}
                 handleCopy={handleCopy}
-                setDeleteTarget={setDeleteTarget}
                 enterSelectMode={enterSelectMode}
                 isFavorited={isFavorited}
                 onRegenerate={onRegenerate}
@@ -2316,16 +2308,6 @@ function MessageList({
         onCloseShare={() => setShareOpen(false)}
         onCloseExportPreview={() => setExportPreviewOpen(false)}
         onDownloadImage={handleDownloadImage}
-      />
-
-      <ChatDeleteMessageDialog
-        targetId={deleteTarget}
-        title={t("chat.deleteMessageTitle")}
-        description={t("chat.deleteMessageDesc")}
-        confirmText={t("common.delete")}
-        cancelText={t("common.cancel")}
-        onDelete={onDeleteMessage}
-        onClose={() => setDeleteTarget(null)}
       />
 
     </div>

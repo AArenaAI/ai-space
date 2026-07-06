@@ -9,6 +9,7 @@ import {
   fetchConversationRestore,
   findLastAssistantStatusTarget,
   hasCompletedLastAssistantStatus,
+  hasTerminalLastAssistantStatus,
   parseConversationCompareModels,
   resolveConversationSkillKey,
 } from "@/lib/chatConversationRestoreCoordinator";
@@ -592,8 +593,8 @@ export function useChatConversationRestoreRuntime({
         });
         if (restoreState) {
           const { loadedMessages, activeByServerMessageId } = restoreState;
-          const backendLastAssistantCompleted = hasCompletedLastAssistantStatus(data.last_assistant_status) && activeByServerMessageId.size === 0;
-          if (backendLastAssistantCompleted && pendingLocalAssistantsRef) {
+          const backendLastAssistantTerminal = (hasCompletedLastAssistantStatus(data.last_assistant_status) || hasTerminalLastAssistantStatus(data.last_assistant_status)) && activeByServerMessageId.size === 0;
+          if (backendLastAssistantTerminal && pendingLocalAssistantsRef) {
             Object.entries(pendingLocalAssistantsRef.current).forEach(([id, entry]) => {
               if (entry.convId === loadConversationId) delete pendingLocalAssistantsRef.current[id];
             });
@@ -606,7 +607,7 @@ export function useChatConversationRestoreRuntime({
             !item.errorCode &&
             (item.serverGenerationStatus === "running" || item.serverGenerationStatus === "streaming" || item.serverGenerationStatus === "queued" || Boolean(item.generationTaskId))
           );
-          const pendingLocalMessagesFromRef = backendLastAssistantCompleted ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
+          const pendingLocalMessagesFromRef = backendLastAssistantTerminal ? [] : Object.entries(pendingLocalAssistantsRef?.current || {})
             .filter(([, entry]) => entry.convId === loadConversationId)
             .map(([id, entry]) => ({ id, message: entry.message }))
             .filter(({ id, message }) => {
@@ -626,7 +627,7 @@ export function useChatConversationRestoreRuntime({
           const pendingLocalMessagesById = new Map(pendingLocalMessagesFromRef.map((message) => [message.id, message]));
           const baseMergedMessages = restoreState.mergedMessages as Message[];
           const collectPendingMessages = (sourceMessages: Message[] | undefined) => {
-            if (backendLastAssistantCompleted) return;
+            if (backendLastAssistantTerminal) return;
             (sourceMessages || []).forEach((message) => {
               if (
                 message.role === "assistant" &&
@@ -642,7 +643,7 @@ export function useChatConversationRestoreRuntime({
           };
           collectPendingMessages(cachedSnapshot?.messages as Message[] | undefined);
           const mergePendingMessages = (prevMessages: Message[]) => {
-            if (backendLastAssistantCompleted) return baseMergedMessages;
+            if (backendLastAssistantTerminal) return baseMergedMessages;
             collectPendingMessages(prevMessages);
             return pendingLocalMessagesById.size > 0
               ? [...baseMergedMessages, ...Array.from(pendingLocalMessagesById.values())]
@@ -670,7 +671,7 @@ export function useChatConversationRestoreRuntime({
             mergedMessages = nextMessages;
             return areConversationMessagesEquivalent(prev, nextMessages) ? prev : nextMessages;
           });
-          const hasPendingLocalMessages = !backendLastAssistantCompleted && mergedMessages.some((message) =>
+          const hasPendingLocalMessages = !backendLastAssistantTerminal && mergedMessages.some((message) =>
             message.role === "assistant" &&
             !message.content?.trim() &&
             !message.completedAt &&

@@ -4,7 +4,6 @@ import type { Message } from "@/lib/chatTypes";
 import {
   buildClearMessagesState,
   buildRegenerateRequest,
-  deleteMessageById,
   switchGroupView,
 } from "@/lib/chatLocalActionCoordinator";
 
@@ -13,7 +12,7 @@ export type SendRegenerateMessage = (
   reasoning: { enabled: boolean; effort?: string },
   isRegenerate: boolean,
   search: boolean
-) => Promise<void>;
+) => Promise<unknown>;
 
 export function createClearMessagesAction(input: {
   setMessages: Dispatch<SetStateAction<Message[]>>;
@@ -23,14 +22,6 @@ export function createClearMessagesAction(input: {
     const clearState = buildClearMessagesState();
     input.setMessages(clearState.messages as Message[]);
     input.setCurrentConversation(clearState.currentConversation);
-  };
-}
-
-export function createDeleteMessageAction(input: {
-  setMessages: Dispatch<SetStateAction<Message[]>>;
-}) {
-  return (messageId: string) => {
-    input.setMessages((prev) => deleteMessageById(prev, messageId));
   };
 }
 
@@ -73,13 +64,6 @@ export function useChatLocalActions(input: {
     [input.setMessages, input.setCurrentConversation]
   );
 
-  const deleteMessage = useCallback(
-    createDeleteMessageAction({
-      setMessages: input.setMessages,
-    }),
-    [input.setMessages]
-  );
-
   const regenerateMessage = useCallback(
     createRegenerateMessageAction({
       getMessages: () => input.messages,
@@ -99,7 +83,6 @@ export function useChatLocalActions(input: {
 
   return {
     clearMessages,
-    deleteMessage,
     regenerateMessage,
     switchGroupModel,
   };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown, Quote, Columns3 } from "lucide-react";
+import { Send, Brain, Square, Search, Paperclip, X, FileText, Wrench, SlidersHorizontal, MessageSquarePlus, Check, Zap, Crown, ChevronDown, Quote, Columns3, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatModel } from "@/lib/chatTypes";
 import { Template } from "@/hooks/useTemplates";
@@ -111,8 +111,10 @@ export type QuoteDraft = {
   text: string;
 };
 
+export type ChatComposerSendResult = { accepted: boolean; notice?: string };
+
 interface MessageInputProps {
-  onSend: (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: AttachedFile[], file_ids?: string[]) => void;
+  onSend: (content: string, reasoning: ReasoningConfig, search: boolean, attachments?: AttachedFile[], file_ids?: string[]) => Promise<ChatComposerSendResult> | ChatComposerSendResult;
   onStop: () => void;
   isLoading: boolean;
   compareMode: boolean;
@@ -167,6 +169,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
   const { isOffline, justRestored } = useNetworkStatus();
   const [content, setContent] = useState("");
   const [activeQuote, setActiveQuote] = useState("");
+  const [sendNotice, setSendNotice] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>(() => initialAttachedFiles || []);
   const [uploading, setUploading] = useState(false);
   const [reasoningMode, setReasoningMode] = useState<ReasoningMode>(() => {
@@ -337,7 +340,24 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     return () => clearInterval(interval);
   }, [attachedFiles]);
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const clearComposer = useCallback(() => {
+    setContent("");
+    setActiveQuote("");
+    setSendNotice("");
+    setAttachedFiles([]);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = `${TEXTAREA_MIN_HEIGHT}px`;
+      textareaRef.current.style.overflowY = "hidden";
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleClear = () => clearComposer();
+    window.addEventListener("chat-composer-clear", handleClear);
+    return () => window.removeEventListener("chat-composer-clear", handleClear);
+  }, [clearComposer]);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const trimmedContent = content.trim();
     const trimmedQuote = activeQuote.trim();
@@ -353,14 +373,18 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
     }
     const file_ids = attachedFiles.map((a) => a.public_id).filter((id): id is string => id !== undefined);
     const messageContent = trimmedQuote ? `${trimmedQuote}\n\n${trimmedContent}`.trim() : trimmedContent;
-    onSend(messageContent, reasoning, effectiveSearchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
-    setContent("");
-    setActiveQuote("");
-    setAttachedFiles([]);
-    if (textareaRef.current) {
-      textareaRef.current.style.height = `${TEXTAREA_MIN_HEIGHT}px`;
-      textareaRef.current.style.overflowY = "hidden";
+    setSendNotice("");
+    let sendResult: ChatComposerSendResult;
+    try {
+      sendResult = await onSend(messageContent, reasoning, effectiveSearchEnabled, attachedFiles.length > 0 ? attachedFiles : undefined, file_ids.length > 0 ? file_ids : undefined);
+    } catch (error) {
+      sendResult = { accepted: false, notice: error instanceof Error ? error.message : "发送失败，当前消息尚未发送。" };
     }
+    if (!sendResult?.accepted) {
+      setSendNotice(sendResult?.notice || "消息尚未发送，已为你保留输入内容。");
+      return;
+    }
+    clearComposer();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -572,6 +596,20 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           offlineLabel={t("messageInput.network.offline")}
           restoredLabel={t("messageInput.network.restored")}
         />
+        {sendNotice && (
+          <div className="mb-2 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.08] px-3 py-2 text-sm leading-relaxed text-text-secondary" data-testid="chat-composer-send-notice">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div className="min-w-0 flex-1 break-words">{sendNotice}</div>
+            <button
+              type="button"
+              onClick={() => setSendNotice("")}
+              className="-mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-text-tertiary transition-colors hover:bg-surface-card hover:text-text-primary"
+              aria-label="关闭提示"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         { /* 上方面板：左侧对比/附件 + 右侧模板/新建 */ }
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -996,6 +1034,8 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
                 <button
                   type="button"
                   onClick={handleStop}
+                  data-testid="chat-stop-button"
+                  aria-label={t("chat.stopGenerating")}
                   className="flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-200 bg-red-500 text-white hover:bg-red-600"
                   title={t("chat.stopGenerating")}
                 >

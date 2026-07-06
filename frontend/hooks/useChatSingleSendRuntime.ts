@@ -37,6 +37,7 @@ type StreamResponse = (
   convId?: number,
   onGroupContext?: (context: ChatStreamGroupContext) => void
 ) => Promise<ChatStreamRunResult | undefined>;
+export type SingleSendAcceptResult = { accepted: boolean; notice?: string; completion?: Promise<void> };
 
 export type UseChatSingleSendRuntimeOptions = {
   apiBaseUrl: string;
@@ -109,8 +110,8 @@ export function useChatSingleSendRuntime({
       attachments?: SendAttachment[],
       file_ids?: string[],
       templatePrefix?: string
-    ) => {
-      if (!shouldStartSingleSend({ content, isRegenerate, attachments })) return;
+    ): Promise<SingleSendAcceptResult> => {
+      if (!shouldStartSingleSend({ content, isRegenerate, attachments })) return { accepted: false, notice: "没有可发送的内容。" };
 
       lastReasoningRef.current = reasoning;
       lastSearchRef.current = search;
@@ -129,7 +130,7 @@ export function useChatSingleSendRuntime({
           }) as Message;
           setMessages((prev) => appendCreateConversationFailureMessage(prev, failureMessage));
           setIsLoading(false);
-          return;
+          return { accepted: false, notice: "创建对话失败，当前消息尚未发送，已为你保留输入内容。" };
         }
       }
 
@@ -144,7 +145,7 @@ export function useChatSingleSendRuntime({
         createId,
         now,
       });
-      if (!messagePlan) return;
+      if (!messagePlan) return { accepted: false, notice: "没有可发送的内容。" };
 
       const sendDedupKey = JSON.stringify({
         convId: convId || "new",
@@ -156,7 +157,7 @@ export function useChatSingleSendRuntime({
         templateId,
         fileIds: file_ids || [],
       });
-      if (inFlightSendKeysRef.current.has(sendDedupKey)) return;
+      if (inFlightSendKeysRef.current.has(sendDedupKey)) return { accepted: false, notice: "这条消息正在发送中。" };
       inFlightSendKeysRef.current.add(sendDedupKey);
 
       const contextMessages = messagePlan.contextMessages;
@@ -179,6 +180,7 @@ export function useChatSingleSendRuntime({
       let activeAssistantId = localAssistantMsg.id;
       let hasInsertedServerAssistant = false;
 
+      const completion = (async () => {
       try {
         const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
         const initResult = await runSingleChatInit<Message>({
@@ -282,6 +284,8 @@ export function useChatSingleSendRuntime({
           }));
         }
       }
+      })();
+      return { accepted: true, completion };
     },
     [
       apiBaseUrl,

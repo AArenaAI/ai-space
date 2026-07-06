@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api/client";
+
 export type CreateConversationBody = {
   title: string;
   model: string;
@@ -42,14 +44,20 @@ export async function runCreateConversationRequest(input: {
   fetchImpl?: typeof fetch;
 }): Promise<CreatedConversationResponse | undefined> {
   const fetcher = input.fetchImpl || fetch;
-  const res = await fetcher(buildCreateConversationUrl(input.apiBaseUrl), {
+  const isBrowserSameOriginApi = typeof window !== "undefined"
+    && fetcher === fetch
+    && (!input.apiBaseUrl || input.apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
+  const requestInit: RequestInit = {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${input.token}`,
     },
     body: JSON.stringify(input.body),
-  });
+  };
+  const res = isBrowserSameOriginApi
+    ? await apiFetch("/conversations", requestInit)
+    : await fetcher(buildCreateConversationUrl(input.apiBaseUrl), { ...requestInit, credentials: "include" });
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");

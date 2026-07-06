@@ -97,8 +97,8 @@ type CompareColumnTurnProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onCopy: (content: string) => void;
-  onDelete: (id: string) => void;
   onRegenerate?: () => void;
+  onRetryColumn?: () => void;
   onContinueGenerate?: () => void;
   onShareSelectMode: (id: string) => void;
   onFavoriteSelectMode: (id: string) => void;
@@ -139,8 +139,8 @@ function CompareColumnTurn({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onCopy,
-  onDelete,
   onRegenerate,
+  onRetryColumn,
   onContinueGenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
@@ -190,11 +190,7 @@ function CompareColumnTurn({
   const isStreaming = !!msg && isLastGroup && !terminalMessage && (isLoading || hasLiveGenerationSignal) && isMessageGenerating(msg, true);
   const isGenerating = !!msg && isMessageGenerating(msg, isStreaming);
   const hasReasoningEntry = Boolean(msg?.reasoningContent?.trim() || /<think>[\s\S]*?<\/think>/i.test(msg?.content || ""));
-  // Compare columns do not support single-column regeneration yet: the current
-  // onRegenerate action is conversation/global and would make both columns show
-  // generation UI. Keep the button hidden until regenerate can target a specific
-  // assistant/model.
-  const canRegenerate = false;
+  const canRegenerate = !!msg && !!onRetryColumn && terminalMessage && !isGenerating;
   const forceHydrateRichText = !!msg && (isLastGroup || isInitialReadingAssistant);
   const skipViewportObservers = !!msg && !deferOffscreenRichTextHydration && shouldSkipViewportObserversForAssistant(msg.content);
   const initialViewportState = forceHydrateRichText || skipViewportObservers;
@@ -420,6 +416,7 @@ function CompareColumnTurn({
     <div
       ref={rowRef}
       data-chat-message-row={suppressRowMarker ? undefined : "true"}
+      data-chat-compare-column-turn="true"
       data-message-id={suppressRowMarker ? undefined : userMessage.id}
       data-message-role={suppressRowMarker ? undefined : "user"}
       style={useContentVisibility ? COMPARE_COLUMN_CONTENT_VISIBILITY_STYLE : undefined}
@@ -563,8 +560,7 @@ function CompareColumnTurn({
                 <div className="sticky bottom-1 z-[2] mt-1 flex items-center gap-2 rounded-xl bg-surface/80 px-2 py-1 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                   <MessageActions
                     onCopy={() => onCopy(msg.content)}
-                    onDelete={() => onDelete(msg.id)}
-                    onRegenerate={onRegenerate}
+                    onRegenerate={onRetryColumn || onRegenerate}
                     onShareSelectMode={() => onShareSelectMode(msg.id)}
                     onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => onFavoriteSelectMode(msg.id) : undefined}
                     isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}

@@ -32,8 +32,7 @@ async function clickConversation(page, id, delayMs = 0) {
 
 async function clickStopIfPresent(page) {
   return page.evaluate(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const stop = buttons.find((button) => /停止|Stop|stop/i.test(`${button.title || ''} ${button.getAttribute('aria-label') || ''} ${button.textContent || ''}`) || /bg-red-500/.test(String(button.className || '')));
+    const stop = document.querySelector('[data-testid="chat-stop-button"]');
     if (!stop) return false;
     stop.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     return true;
@@ -42,7 +41,7 @@ async function clickStopIfPresent(page) {
 
 async function waitForIdle(page, timeoutMs = 90000) {
   await page.waitForFunction(() => {
-    const stopButtons = Array.from(document.querySelectorAll('button')).filter((button) => /停止|Stop|stop/i.test(`${button.title || ''} ${button.getAttribute('aria-label') || ''} ${button.textContent || ''}`) || /bg-red-500/.test(String(button.className || ''))).length;
+    const stopButtons = document.querySelectorAll('[data-testid="chat-stop-button"]').length;
     const pendingShells = document.querySelectorAll('[data-chat-pending-shell="true"]').length;
     const assistantRows = Array.from(document.querySelectorAll('[data-chat-message-row="true"][data-message-role="assistant"]'));
     const latest = assistantRows[assistantRows.length - 1];
@@ -80,7 +79,7 @@ async function sample(page, label) {
     const ids = rows.map((row) => row.id).filter(Boolean);
     const duplicateIds = Array.from(new Set(ids.filter((id, index) => ids.indexOf(id) !== index)));
     const allButtons = Array.from(document.querySelectorAll('button'));
-    const stopButtons = allButtons.filter((button) => /停止|Stop|stop/i.test(`${button.title || ''} ${button.getAttribute('aria-label') || ''} ${button.textContent || ''}`) || /bg-red-500/.test(String(button.className || ''))).length;
+    const stopButtons = document.querySelectorAll('[data-testid="chat-stop-button"]').length;
     const submitButtons = allButtons.filter((button) => (button.getAttribute('type') || '') === 'submit').length;
     const pendingShellHeights = rows.flatMap((row) => row.pendingShells.map((shell) => shell.height));
     return {

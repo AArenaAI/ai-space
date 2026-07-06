@@ -12,6 +12,7 @@ import type { ChatStreamRunResult } from "./chatStreamRunResult";
 export type CompareAssistantLike = {
   id: string;
   model?: string;
+  groupIndex?: number;
   serverMessageId?: number;
   generationTaskId?: number;
   serverGenerationStatus?: string;
@@ -183,17 +184,18 @@ export async function runCompareModel<TAssistant extends CompareAssistantLike>({
   options: RunCompareModelsOptions<TAssistant>;
 }): Promise<void> {
   const controller = options.controllers[index];
+  const requestIndex = typeof assistant.groupIndex === "number" ? assistant.groupIndex : index;
   const fetchImpl = options.callbacks.fetchImpl || fetch;
   let streamResult: ChatStreamRunResult | undefined;
   try {
     const requestGroupContext = getCompareRequestGroupContext({
-      index,
+      index: requestIndex,
       explicitContext: explicitGroupContext,
       currentContext: coordinator.getGroupContext(),
     });
     const requestBody = buildCompareRunRequestBody({
       assistant,
-      index,
+      index: requestIndex,
       requestGroupContext,
       compareModelIds: options.compareModelIds,
       modelMessages: options.modelMessages,

@@ -229,7 +229,9 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
   }; };
   createConversationRequestImpl = async ({ body }) => ({ id: 42, title: body.title });
   const { runtime, state, refs } = makeRuntime({ token: "tok" });
-  await runtime.sendMessage("hello world", { enabled: true, effort: "low" }, false, true, 3, false, [{ filename: "a", content: "", type: "file", public_id: "p" }], ["f1"], "tpl");
+  const accepted = await runtime.sendMessage("hello world", { enabled: true, effort: "low" }, false, true, 3, false, [{ filename: "a", content: "", type: "file", public_id: "p" }], ["f1"], "tpl");
+  await accepted.completion;
+  assert.equal(accepted.accepted, true);
   assert.equal(events.find((e) => e[0] === "created")?.[1], 42);
   assert.equal(state.messages.length, 2);
   assert.equal(state.messages[1].role, "assistant");
@@ -247,7 +249,9 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
 async function testSingleSendCreateFailureAppendsPlaceholder() {
   createConversationRequestImpl = async () => undefined;
   const { runtime, state } = makeRuntime({ token: "tok" });
-  await runtime.sendMessage("hello");
+  const accepted = await runtime.sendMessage("hello");
+  assert.equal(accepted.accepted, false);
+  assert.match(accepted.notice, /创建对话失败/);
   assert.equal(state.messages.length, 1);
   assert.equal(state.messages[0].error, "create failed");
   assert.equal(state.isLoading, false);
@@ -256,7 +260,9 @@ async function testSingleSendCreateFailureAppendsPlaceholder() {
 async function testSingleSendRequestErrorPatchesAssistant() {
   singleInitImpl = async () => { throw new Error("boom"); };
   const { runtime, state } = makeRuntime({ currentConversation: 9 });
-  await runtime.sendMessage("hello");
+  const accepted = await runtime.sendMessage("hello");
+  await accepted.completion;
+  assert.equal(accepted.accepted, true);
   assert.equal(state.messages.length, 2);
   assert.equal(state.messages[1].error, "boom");
 }
@@ -312,11 +318,27 @@ async function testCompareGuardSkipsInvalidWidth() {
   assert.equal(state.messages.length, 0);
 }
 
+async function testCompareInitFailureLeavesNoLocalMessages() {
+  let ran = false;
+  compareInitImpl = async () => { throw new Error("compare init boom"); };
+  compareRunImpl = async () => { ran = true; };
+  const { runtime, state } = makeRuntime({ currentConversation: 10, token: "tok" });
+  await assert.rejects(
+    () => runtime.sendCompareMessages("compare draft", ["m1", "m2"]),
+    /compare init boom/
+  );
+  assert.equal(ran, false);
+  assert.equal(state.messages.length, 0);
+  assert.equal(state.isCompare, false);
+  assert.equal(state.isLoading, false);
+}
+
 (async () => {
   await testSingleSendCreatesConversationAndRunsRequest();
   await testSingleSendCreateFailureAppendsPlaceholder();
   await testSingleSendRequestErrorPatchesAssistant();
   await testCompareSendStartsCompareAndRunCoordinator();
   await testCompareGuardSkipsInvalidWidth();
+  await testCompareInitFailureLeavesNoLocalMessages();
   console.log("chat send runtime hook regression passed");
 })();

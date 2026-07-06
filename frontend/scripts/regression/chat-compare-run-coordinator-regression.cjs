@@ -108,6 +108,41 @@ test("coordinator resolves once when group context is ready", async () => {
   assert.equal(resolved.length, 1);
 });
 
+test("runCompareModels preserves assistant groupIndex for single-column explicit retry", async () => {
+  const calls = [];
+  await runCompareModels({
+    headers: { "Content-Type": "application/json" },
+    controllers: [new AbortController()],
+    assistantMessages: [{ id: "retry-right", model: "m2", groupIndex: 1 }],
+    compareModelIds: ["m1", "m2"],
+    modelMessages: [{ role: "user", content: "hi" }],
+    conversationId: 77,
+    reasoning: { enabled: false },
+    search: false,
+    templateId: 0,
+    explicitGroupContext: { groupId: 900, userMessageId: 901, groupModels: ["m1", "m2"] },
+    callbacks: {
+      fetchImpl: async (_url, init) => {
+        calls.push(init.body ? JSON.parse(init.body) : {});
+        return okResponse({ assistant_message_id: 902, task_id: 903, assistant_message: { id: 902, generation_status: "running" } });
+      },
+      streamResponse: async () => ({ lastSequence: 1, content: "", useBackground: false, sawDone: true }),
+      onGroupContextResolved: () => {},
+      onRecoverableResult: () => {},
+      onAbortUser: () => {},
+      onRunError: () => {},
+      getAbortReason: () => null,
+    },
+  });
+  const initBodies = calls.filter((body) => body.model);
+  assert.equal(initBodies.length, 1);
+  assert.equal(initBodies[0].model, "m2");
+  assert.equal(initBodies[0].group_id, 900);
+  assert.equal(initBodies[0].user_message_id, 901);
+  assert.equal(initBodies[0].group_index, 1);
+  assert.equal(initBodies[0].skip_save_user_msg, true);
+});
+
 test("runCompareModels starts every model immediately when explicit group context is provided", async () => {
   const calls = [];
   const result = await Promise.race([

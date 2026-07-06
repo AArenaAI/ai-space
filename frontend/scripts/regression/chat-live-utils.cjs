@@ -1,6 +1,27 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const { chromium } = require('playwright');
 
 const DEFAULT_BASE = 'https://testnet.ai-space.xyz';
+
+function loadEnvLocal() {
+  const envPath = path.resolve(__dirname, '../../.env.local');
+  if (!fs.existsSync(envPath)) return;
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+    const eq = trimmed.indexOf('=');
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key && !process.env[key]) process.env[key] = value;
+  }
+}
+
+loadEnvLocal();
 
 function env(name, fallback = '') {
   return process.env[name] || fallback;

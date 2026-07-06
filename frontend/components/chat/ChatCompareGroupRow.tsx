@@ -24,12 +24,12 @@ export type ChatCompareGroupRowProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onCopy: (content: string) => void;
-  onDelete: (id: string) => void;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
   onShareSelectMode: (id: string) => void;
   onFavoriteSelectMode: (id: string) => void;
   isFavorited: (serverMessageId: number) => boolean;
+  onRetryColumn?: (assistant: Message, userMessage: Message) => void | Promise<void>;
   onForkCompare?: (messageId: number) => void;
   onSaveToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
@@ -61,12 +61,12 @@ function ChatCompareGroupRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onCopy,
-  onDelete,
   onRegenerate,
   onContinueGenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
   isFavorited,
+  onRetryColumn,
   onForkCompare,
   onSaveToNote,
   onAssistantViewed,
@@ -94,6 +94,9 @@ function ChatCompareGroupRow({
     <div
       className="mx-auto max-w-[1440px] px-4 py-4"
       data-chat-message-row="true"
+      data-chat-compare-group="true"
+      data-chat-compare-group-id={group.id}
+      data-chat-compare-user-message-id={group.userMessage.serverMessageId ?? group.userMessage.id}
       data-message-id={group.userMessage.id}
       data-message-role="user"
     >
@@ -109,7 +112,14 @@ function ChatCompareGroupRow({
             : defaultAssistant;
 
           return (
-            <div key={modelId || colIndex} className="flex min-w-0 flex-col py-1" data-chat-compare-column-shell="true">
+            <div
+              key={modelId || colIndex}
+              className="flex min-w-0 flex-col py-1"
+              data-chat-compare-column-shell="true"
+              data-chat-compare-column-index={colIndex}
+              data-chat-compare-column-model={modelId || undefined}
+              data-chat-compare-assistant-message-id={assistant?.serverMessageId ?? assistant?.id}
+            >
               <CompareColumnTurn
                 userMessage={group.userMessage}
                 assistantMessage={assistant}
@@ -128,12 +138,12 @@ function ChatCompareGroupRow({
                 imageLoadFailedLabel={imageLoadFailedLabel}
                 MarkdownRenderer={MarkdownRenderer}
                 onCopy={onCopy}
-                onDelete={onDelete}
                 onRegenerate={onRegenerate}
                 onContinueGenerate={onContinueGenerate}
                 onShareSelectMode={onShareSelectMode}
                 onFavoriteSelectMode={onFavoriteSelectMode}
                 isFavorited={isFavorited}
+                onRetryColumn={assistant ? () => onRetryColumn?.(assistant, group.userMessage) : undefined}
                 onForkCompare={onForkCompare}
                 onSaveToNote={onSaveToNote}
                 onAssistantViewed={onAssistantViewed}

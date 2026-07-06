@@ -70,7 +70,6 @@ export type MessageRowProps = {
   switchGroupModel?: (groupId: number, activeIndex: number) => void;
   toggleSelect: (id: string) => void;
   handleCopy: (content: string) => void;
-  setDeleteTarget: (id: string) => void;
   enterSelectMode: (mode: "share" | "favorite", id: string) => void;
   isFavorited: (serverMessageId: number) => boolean;
   onRegenerate?: () => void;
@@ -110,7 +109,6 @@ function MessageRow({
   switchGroupModel,
   toggleSelect,
   handleCopy,
-  setDeleteTarget,
   enterSelectMode,
   isFavorited,
   onRegenerate,
@@ -391,7 +389,6 @@ function MessageRow({
             {!selectMode && !isStreaming && !isGenerating && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
               <MessageActions
                 onCopy={() => handleCopy(msg.content)}
-                onDelete={() => setDeleteTarget(msg.id)}
                 onRegenerate={onRegenerate}
                 onShareSelectMode={() => enterSelectMode("share", msg.id)}
                 onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}

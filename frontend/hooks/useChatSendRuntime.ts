@@ -123,7 +123,7 @@ export function useChatSendRuntime({
     dispatchWindowEvent,
   });
 
-  const { sendCompareMessages } = useChatCompareSendRuntime({
+  const { sendCompareMessages, retryCompareColumn } = useChatCompareSendRuntime({
     apiBaseUrl,
     messages,
     models,
@@ -156,6 +156,7 @@ export function useChatSendRuntime({
   return {
     createConversation,
     sendCompareMessages,
+    retryCompareColumn,
     sendMessage,
   };
 }

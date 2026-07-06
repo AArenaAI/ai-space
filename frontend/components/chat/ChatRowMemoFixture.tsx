@@ -119,7 +119,6 @@ export default function ChatRowMemoFixture() {
           conversationId={7001}
           isLoadingMore={false}
           hasMoreMessages={false}
-          onDeleteMessage={handleDelete}
           onRegenerate={handleRegenerate}
           welcomeTitle={`unused-${unrelatedTick}`}
         />

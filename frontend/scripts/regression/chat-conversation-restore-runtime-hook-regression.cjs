@@ -76,6 +76,8 @@ function loadModule(file) {
         },
         findLastAssistantStatusTarget: (messages) => [...messages].reverse().find((m) => m.role === "assistant" && m.serverMessageId),
         hasCompletedLastAssistantStatus: (statusData) => statusData?.background_task?.status === 'completed' && String(statusData?.message?.content || '').trim().length > 0,
+        isTerminalGenerationStatus: (status) => ['completed', 'failed', 'cancelled', 'incomplete'].includes(status || ''),
+        hasTerminalLastAssistantStatus: (statusData) => ['completed', 'failed', 'cancelled', 'incomplete'].includes(statusData?.background_task?.status || ''),
         buildConversationStatusDecision: ({ statusData, currentMessage, busyActivityStatus }) => {
           const bgTask = statusData?.background_task || {};
           const status = bgTask.status || '';
@@ -606,6 +608,82 @@ async function testCompletedServerAssistantDropsPendingLocalPlaceholder() {
   assert.equal(refs.pendingLocalAssistantsRef.current["local-a1"], undefined);
 }
 
+async function testTerminalFailedStatusClearsPendingAndLoading() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Failed",
+    model: "m1",
+    messages: [
+      { id: "u1", role: "user", content: "waiting", created_at: "2026-01-01T00:00:00Z" },
+      { id: "srv-a1", role: "assistant", content: "Generation was interrupted.", serverMessageId: 42, generationTaskId: 9, serverGenerationStatus: "failed", created_at: "2026-01-01T00:00:02Z" },
+    ],
+    last_assistant_status: {
+      message: { id: 42, content: "Generation was interrupted." },
+      background_task: { id: 9, assistant_message_id: 42, status: "failed", completed_at: "2026-01-01T00:00:08Z" },
+    },
+  });
+  statusImpl = async () => { throw new Error("status should not fetch for terminal failed status"); };
+  countImpl = async () => undefined;
+  const pendingMessage = {
+    id: "local-a1",
+    role: "assistant",
+    content: "",
+    model: "m1",
+    createdAt: Date.parse("2026-01-01T00:00:02Z"),
+    activityStatus: { kind: "generating", label: "busy" },
+    generationStartedAt: Date.parse("2026-01-01T00:00:02Z"),
+  };
+  const { state, refs, starts } = runRuntime({
+    conversationId: 9,
+    token: "tok",
+    pendingLocalAssistants: { "local-a1": { convId: 9, message: pendingMessage } },
+  });
+  await flush(); await flush();
+  assert.equal(starts.some((entry) => entry[0] === "poll"), false);
+  assert.equal(state.messages.some((message) => message.id === "local-a1"), false);
+  const assistant = state.messages.find((message) => message.serverMessageId === 42);
+  assert.ok(assistant);
+  assert.equal(assistant.activityStatus, undefined);
+  assert.equal(assistant.serverGenerationStatus, "failed");
+  assert.equal(refs.pendingLocalAssistantsRef.current["local-a1"], undefined);
+  assert.equal(state.calls.filter((c) => c[0] === "loading").at(-1)?.[1], false);
+}
+
+async function testTerminalBackendMessageBeatsActiveTaskStream() {
+  snapshotCache.clear();
+  persistentSnapshotCache.clear();
+  restoreImpl = async () => ({
+    title: "Done beats stream",
+    model: "m1",
+    messages: [
+      { id: "u1", role: "user", content: "waiting" },
+      { id: "42", role: "assistant", content: "final", serverMessageId: 42, generationTaskId: 9, serverGenerationStatus: "completed", completedAt: 1000 },
+    ],
+    last_assistant_status: {
+      message: { id: 42, content: "final" },
+      background_task: { id: 9, assistant_message_id: 42, status: "completed", completed_at: "2026-01-01T00:00:08Z" },
+    },
+  });
+  statusImpl = async () => { throw new Error("status should not fetch for completed status"); };
+  countImpl = async () => undefined;
+  const { state } = runRuntime({
+    conversationId: 9,
+    token: "tok",
+    active: {
+      "local-streaming": { convId: 9, serverMessageId: 42, generationTaskId: 9, lastSequence: 3, content: "partial" },
+    },
+  });
+  await flush(); await flush();
+  const assistants = state.messages.filter((message) => message.role === "assistant");
+  assert.equal(assistants.length, 1);
+  assert.equal(assistants[0].id, "42");
+  assert.equal(assistants[0].content, "final");
+  assert.equal(assistants[0].activityStatus, undefined);
+  assert.equal(assistants[0].serverGenerationStatus, "completed");
+  assert.equal(state.calls.filter((c) => c[0] === "loading").at(-1)?.[1], false);
+}
+
 async function testCachedStreamingAndServerAssistantDedupesByServerId() {
   snapshotCache.clear();
   persistentSnapshotCache.clear();
@@ -671,6 +749,8 @@ async function testNavigationAbortsControllers() {
   await testOptimisticCachedPendingSurvivesBackendUserOnlyRestore();
   await testVisiblePendingAssistantSurvivesRestoreWhenBackendHasNoAnswerYet();
   await testCompletedServerAssistantDropsPendingLocalPlaceholder();
+  await testTerminalFailedStatusClearsPendingAndLoading();
+  await testTerminalBackendMessageBeatsActiveTaskStream();
   await testCachedStreamingAndServerAssistantDedupesByServerId();
   await testNavigationAbortsControllers();
   console.log("chat conversation restore runtime hook regression passed");

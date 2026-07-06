@@ -35,6 +35,15 @@ function parseTimelineValue(value: unknown): ChatStatusTimelineStep[] | undefine
   return steps.length ? steps : undefined;
 }
 
+function isTerminalTaskStatus(status?: string) {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "incomplete";
+}
+
+function isTerminalActivityMessage(message?: Message | null) {
+  if (!message) return false;
+  return Boolean(message.completedAt || message.stopped || message.errorCode || isTerminalTaskStatus(message.serverGenerationStatus));
+}
+
 function getActivityStepLabel(_t: (key: string, params?: Record<string, string>) => string, step: ChatStatusTimelineStep, _generationStartedAt?: number, _durationStartAt?: number) {
   if (step.kind === "web_search") {
     const count = step.count ? `${step.count} 个来源` : "网页来源";
@@ -141,11 +150,13 @@ export default function ChatActivityPanel({
   const [showAllSourceGroups, setShowAllSourceGroups] = useState(false);
   const [snapshotTimeline, setSnapshotTimeline] = useState<ChatStatusTimelineStep[] | undefined>();
   const realtime = useMessageRealtime(message?.id || "", Boolean(message));
+  const messageTerminal = isTerminalActivityMessage(message);
   useEffect(() => {
     setSnapshotTimeline(undefined);
     const taskId = message?.generationTaskId;
-    if (!taskId || typeof window === "undefined") return;
+    if (!taskId || typeof window === "undefined" || messageTerminal) return;
     let cancelled = false;
+    let timer: number | undefined;
     const loadSnapshot = () => {
       apiFetch(`/tasks/${taskId}`)
         .then((res) => res.ok ? res.json() : undefined)
@@ -153,13 +164,20 @@ export default function ChatActivityPanel({
           if (cancelled || !data) return;
           const timeline = parseTimelineValue(data?.message?.status_timeline || data?.task?.status_timeline);
           if (timeline?.length) setSnapshotTimeline(timeline);
+          if (isTerminalTaskStatus(data?.task?.status)) {
+            cancelled = true;
+            if (timer) window.clearInterval(timer);
+          }
         })
         .catch(() => {});
     };
     loadSnapshot();
-    const timer = window.setInterval(loadSnapshot, 1000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [message?.generationTaskId, message?.id]);
+    timer = window.setInterval(loadSnapshot, 1000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [message?.generationTaskId, message?.id, messageTerminal]);
   if (!message) return null;
   const runtimeState = resolveChatMessageRuntimeState({ message, realtime, snapshotTimeline });
   const sources = normalizeSearchSources(runtimeState.searchSources);

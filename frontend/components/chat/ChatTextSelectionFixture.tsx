@@ -46,7 +46,10 @@ export default function ChatTextSelectionFixture() {
         />
       </div>
       <MessageInput
-        onSend={(content: string, _reasoning: ReasoningConfig) => setLastSentContent(content)}
+        onSend={(content: string, _reasoning: ReasoningConfig) => {
+          setLastSentContent(content);
+          return { accepted: true };
+        }}
         onStop={() => {}}
         isLoading={false}
         compareMode={false}

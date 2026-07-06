@@ -39,10 +39,6 @@ export function buildClearMessagesState(): ClearMessagesState {
   };
 }
 
-export function deleteMessageById<Message extends { id: string }>(messages: Message[], messageId: string): Message[] {
-  return messages.filter((message) => message.id !== messageId);
-}
-
 export function findLastUserMessage<Message extends { role: string; content: string }>(messages: Message[]): Message | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];

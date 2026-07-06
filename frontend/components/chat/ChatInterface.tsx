@@ -6,7 +6,7 @@ import type { ChatModel } from "@/lib/chatTypes";
 import type { ChatBootstrapPayload } from "@/lib/chatBootstrapCoordinator";
 import { useTemplates } from "@/hooks/useTemplates";
 import MessageList from "./MessageList";
-import MessageInput, { ReasoningConfig, type QuoteDraft } from "./MessageInput";
+import MessageInput, { ReasoningConfig, type ChatComposerSendResult, type QuoteDraft } from "./MessageInput";
 import ModelSelector from "./ModelSelector";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { Zap, X, Pencil, Bot } from "lucide-react";
@@ -135,7 +135,6 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     sendMessage,
     stopGeneration,
     clearMessages,
-    deleteMessage,
     regenerateMessage,
     currentConversation,
     effectiveSkillKey,
@@ -144,6 +143,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     compareModels,
     setCompareModels,
     sendCompareMessages,
+    retryCompareColumn,
     groupViews,
     switchGroupModel,
     forkChat,
@@ -336,7 +336,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
   const { trackChatStart, trackChatComplete, trackModelSwitch } = useChatAnalytics();
   const prevModelRef = useRef<string>("");
 
-  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false) => {
+  const handleSend = async (content: string, reasoning: ReasoningConfig | undefined, search: boolean, attachments?: { filename: string; content: string; type: string; public_id?: string }[], file_ids?: string[], skipUserMessage = false): Promise<ChatComposerSendResult> => {
     const activeCompareMode = compareMode || isCompare;
     const currentSelectedModels = activeCompareMode
       ? normalizeCompareModelIds(
@@ -348,27 +348,30 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     // 内测批次权限检查：被当前 batch 锁定的模型直接提示，不进入 Bad Case 解锁流程。
     const blockedModelId = currentSelectedModels.find((modelId) => getBetaModelBlockedMessage(modelId));
     if (blockedModelId) {
-      toast.error(getBetaModelBlockedMessage(blockedModelId) || "当前内测批次暂未开放该模型");
-      return;
+      const notice = getBetaModelBlockedMessage(blockedModelId) || "当前内测批次暂未开放该模型，当前消息尚未发送。";
+      toast.error(notice);
+      return { accepted: false, notice };
     }
 
     // 积分检查：额度不足时弹出 Bad Case 提交模态框。对比模式必须校验所有将要调用的模型。
     // 未激活用户优先提示激活，不显示额度耗尽。
-    const firstModelWithoutCredits = currentSelectedModels.find((modelId) => !hasEnoughCredits(modelId));
-    if (firstModelWithoutCredits) {
+    if (currentSelectedModels.some((modelId) => !hasEnoughCredits(modelId))) {
       if (credits?.beta_phase === "") {
-        toast.error("🔒 账号未激活：请使用邀请码激活或提交内测申请。");
+        const notice = "🔒 账号未激活：请使用邀请码激活或提交内测申请。当前消息尚未发送。";
+        toast.error(notice);
+        return { accepted: false, notice };
       } else {
+        const notice = "积分不足，当前消息尚未发送。已为你保留输入内容，可提交 Bad Case 或换模型后重试。";
         setCreditExhaustedOpen(true);
+        return { accepted: false, notice };
       }
-      return;
     }
 
     // 昂贵模型二次确认（Chat 1，22 Credits/次）
     if (currentSelectedModels.some((modelId) => isExpensiveModel(modelId))) {
       setPendingSendPayload({ content, reasoning, search, attachments, file_ids, skipUserMessage: skipUserMessage || false });
       setExpensiveModelConfirmOpen(true);
-      return;
+      return { accepted: false, notice: "请先确认本次高消耗模型调用。当前消息尚未发送，已保留输入内容。" };
     }
 
     // 埋点：聊天开始
@@ -381,19 +384,31 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       setCompareTargetMessageId(undefined);
       selectedModelsRef.current = currentSelectedModels;
       if (currentSelectedModels.length < 2) {
+        const notice = "请选择至少两个模型后再发送，当前消息尚未发送。";
         toast.error(t("chat.compareMinModels"));
-        return;
+        return { accepted: false, notice };
       }
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
       setIsComplexTask(isComplexReasoningTask(reasoning, currentSelectedModels));
       const { templateId, templatePrefix } = getSelectedTemplatePayload();
-      await sendCompareMessages(content, currentSelectedModels, reasoning, search, templateId, attachments, file_ids, templatePrefix);
+      try {
+        await sendCompareMessages(content, currentSelectedModels, reasoning, search, templateId, attachments, file_ids, templatePrefix);
+      } catch (error) {
+        const notice = error instanceof Error ? error.message : "初始化对比会话失败，当前消息尚未发送。";
+        toast.error(notice);
+        return { accepted: false, notice };
+      }
     } else {
       // 前端目前没有后端返回的任务复杂度字段，先用用户发送时选择的推理档位判断复杂任务
       setIsComplexTask(isComplexReasoningTask(reasoning));
       const { templateId, templatePrefix } = getSelectedTemplatePayload();
-      sendMessage(content, reasoning, false, search, templateId, skipUserMessage, attachments, file_ids, templatePrefix);
+      const sendResult = await sendMessage(content, reasoning, false, search, templateId, skipUserMessage, attachments, file_ids, templatePrefix);
+      if (!sendResult?.accepted) {
+        return { accepted: false, notice: sendResult?.notice || "发送失败，当前消息尚未发送。" };
+      }
+      sendResult.completion?.catch(() => {});
     }
+    return { accepted: true };
   };
 
   useEffect(() => {
@@ -671,7 +686,6 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           isComplexTask={isComplexTask}
           models={models}
           conversationId={conversationId}
-          onDeleteMessage={deleteMessage}
           onRegenerate={regenerateMessage}
           onContinueGenerate={regenerateMessage}
           isCompare={activeCompareMode}
@@ -687,6 +701,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           }}
           groupViews={groupViews}
           switchGroupModel={switchGroupModel}
+          onRetryCompareColumn={retryCompareColumn}
           onForkCompare={(messageId) => {
             setForkTargetMessageId(messageId);
             setForkDialogOpen(true);
@@ -859,12 +874,23 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
               if (currentSelectedModels.length >= 2) {
                 setIsComplexTask(isComplexReasoningTask(payload.reasoning, currentSelectedModels));
                 const { templateId, templatePrefix } = getSelectedTemplatePayload();
-                sendCompareMessages(payload.content, currentSelectedModels, payload.reasoning, payload.search, templateId, payload.attachments, payload.file_ids, templatePrefix);
+                sendCompareMessages(payload.content, currentSelectedModels, payload.reasoning, payload.search, templateId, payload.attachments, payload.file_ids, templatePrefix)
+                  .then(() => window.dispatchEvent(new Event("chat-composer-clear")))
+                  .catch((error) => toast.error(error instanceof Error ? error.message : "初始化对比会话失败"));
               }
             } else {
               setIsComplexTask(isComplexReasoningTask(payload.reasoning));
               const { templateId, templatePrefix } = getSelectedTemplatePayload();
-              sendMessage(payload.content, payload.reasoning, false, payload.search, templateId, payload.skipUserMessage, payload.attachments, payload.file_ids, templatePrefix);
+              sendMessage(payload.content, payload.reasoning, false, payload.search, templateId, payload.skipUserMessage, payload.attachments, payload.file_ids, templatePrefix)
+                .then((sendResult) => {
+                  if (sendResult?.accepted) {
+                    window.dispatchEvent(new Event("chat-composer-clear"));
+                    sendResult.completion?.catch(() => {});
+                  } else if (sendResult?.notice) {
+                    toast.error(sendResult.notice);
+                  }
+                })
+                .catch((error) => toast.error(error instanceof Error ? error.message : "发送失败"));
             }
           }}
           title="⚠️ 极度深度推理确认"

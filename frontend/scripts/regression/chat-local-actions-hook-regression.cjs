@@ -13,7 +13,7 @@ const coordinatorFile = path.join(repoRoot, "lib/chatLocalActionCoordinator.ts")
 let source = fs.readFileSync(sourceFile, "utf8");
 source = source.replace(/import type[^;]+chatTypes[^;]+;\n/g, "");
 source = source.replace(
-  /import \{\n  buildClearMessagesState,\n  buildRegenerateRequest,\n  deleteMessageById,\n  switchGroupView,\n\} from "@\/lib\/chatLocalActionCoordinator";/,
+  /import \{\n  buildClearMessagesState,\n  buildRegenerateRequest,\n  switchGroupView,\n\} from "@\/lib\/chatLocalActionCoordinator";/,
   fs.readFileSync(coordinatorFile, "utf8").replace(/export /g, "")
 );
 const compiled = ts.transpileModule(source, {
@@ -29,7 +29,6 @@ fs.writeFileSync(outFile, compiled.outputText.replace('require("react")', '{}'))
 
 const {
   createClearMessagesAction,
-  createDeleteMessageAction,
   createRegenerateMessageAction,
   createSwitchGroupModelAction,
 } = require(outFile);
@@ -56,13 +55,6 @@ test("createClearMessagesAction clears messages and conversation", () => {
   action();
   assert.deepEqual(messages.get(), []);
   assert.equal(conversation.get(), undefined);
-});
-
-test("createDeleteMessageAction removes matching id", () => {
-  const messages = createState([{ id: "a" }, { id: "b" }]);
-  const action = createDeleteMessageAction({ setMessages: messages.set });
-  action("a");
-  assert.deepEqual(messages.get(), [{ id: "b" }]);
 });
 
 test("createRegenerateMessageAction sends latest user message", async () => {

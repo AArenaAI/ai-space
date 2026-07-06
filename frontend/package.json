@@ -126,7 +126,12 @@
     "test:chat-rich-markdown-stability-live": "JITTER_SCENARIO=code_table JITTER_ROUNDS=2 JITTER_SWITCHBACK=1 JITTER_SAMPLE_MS=9000 JITTER_SETTLE_SAMPLE_MS=3500 node scripts/regression/chat-placeholder-jitter-live.cjs",
     "test:chat-old-row-rich-stability-live": "JITTER_SCENARIO=mixed_rich JITTER_ROUNDS=5 JITTER_SWITCHBACK=1 JITTER_SAMPLE_MS=9500 JITTER_SETTLE_SAMPLE_MS=4200 JITTER_MAX_OLD_SIGNATURE_CHANGES=2 node scripts/regression/chat-placeholder-jitter-live.cjs",
     "test:chat-block-anchor-restore-live": "node scripts/regression/chat-block-anchor-restore-live.cjs",
-    "test:chat-row-memo-fixture": "node scripts/regression/chat-row-memo-fixture.cjs"
+    "test:chat-row-memo-fixture": "node scripts/regression/chat-row-memo-fixture.cjs",
+    "test:chat-composer-submit-contract": "node scripts/regression/chat-composer-submit-contract-static.cjs",
+    "test:chat-activity-polling-static": "node scripts/regression/chat-activity-polling-static.cjs",
+    "test:chat-compare-dom-markers-static": "node scripts/regression/chat-compare-dom-markers-static.cjs",
+    "test:chat-pending-shell-static": "node scripts/regression/chat-pending-shell-static.cjs",
+    "test:chat-pending-shell-ui-fixture": "node scripts/regression/chat-pending-shell-ui-fixture.cjs"
   },
   "dependencies": {
     "@antv/g6": "^5.1.1",

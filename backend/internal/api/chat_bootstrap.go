@@ -201,13 +201,12 @@ func (h *ChatBootstrapHandler) resolveBootstrapUser(c *gin.Context) (uint, strin
 	if userID := getUserID(c); userID > 0 {
 		return userID, "", true
 	}
-	cookie, err := c.Request.Cookie(refreshTokenCookieName)
-	if err != nil || cookie == nil || cookie.Value == "" {
+	if len(refreshTokenCookieValues(c.Request)) == 0 {
 		return 0, "", true
 	}
 	now := time.Now()
-	var stored models.RefreshToken
-	if err := h.db.Where("token_hash = ?", hashRefreshToken(cookie.Value)).First(&stored).Error; err != nil || !isRefreshTokenUsable(stored, now) {
+	_, stored, ok := findUsableRefreshToken(h.db, c.Request, now)
+	if !ok {
 		auth := NewAuthHandler(h.db, h.cfg)
 		auth.clearRefreshTokenCookie(c)
 		return 0, "", true

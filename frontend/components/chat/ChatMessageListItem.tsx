@@ -31,7 +31,6 @@ export type ChatMessageListItemProps = {
   switchGroupModel?: (groupId: number, activeIndex: number) => void;
   toggleSelect: (id: string) => void;
   handleCopy: (content: string) => void;
-  setDeleteTarget: (id: string) => void;
   enterSelectMode: (mode: "share" | "favorite", id: string) => void;
   isFavorited: (serverMessageId: number) => boolean;
   onRegenerate?: () => void;
@@ -72,7 +71,6 @@ function ChatMessageListItem({
   switchGroupModel,
   toggleSelect,
   handleCopy,
-  setDeleteTarget,
   enterSelectMode,
   isFavorited,
   onRegenerate,
@@ -112,7 +110,6 @@ function ChatMessageListItem({
       switchGroupModel={switchGroupModel}
       toggleSelect={toggleSelect}
       handleCopy={handleCopy}
-      setDeleteTarget={setDeleteTarget}
       enterSelectMode={enterSelectMode}
       isFavorited={isFavorited}
       onRegenerate={onRegenerate}
