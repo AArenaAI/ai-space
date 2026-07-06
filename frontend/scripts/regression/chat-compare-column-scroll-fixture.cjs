@@ -145,9 +145,14 @@ async function sample(page, label) {
         .find((node) => node instanceof HTMLElement && node.offsetParent !== null && node.clientHeight > 0);
       const root = outer instanceof HTMLElement ? outer : document;
       const column = Array.from(root.querySelectorAll('[data-compare-column-scroll-container="true"]'))[targetIndex];
+      const shell = column instanceof HTMLElement ? column.closest('[data-chat-compare-column-shell="true"]') : null;
       const frame = column instanceof HTMLElement ? column.closest('[data-compare-column-scroll-frame="true"]') : null;
       const topShadow = frame?.querySelector('[data-compare-column-scroll-shadow="top"]');
       const bottomShadow = frame?.querySelector('[data-compare-column-scroll-shadow="bottom"]');
+      const actionRow = shell?.querySelector('[data-compare-column-action-row="true"]');
+      const actionRect = actionRow?.getBoundingClientRect();
+      const frameRect = frame?.getBoundingClientRect();
+      const actionStyle = actionRow ? getComputedStyle(actionRow) : null;
       if (!(column instanceof HTMLElement)) return { missing: true };
       return {
         canScroll: column.getAttribute('data-compare-column-can-scroll'),
@@ -155,6 +160,12 @@ async function sample(page, label) {
         atBottom: column.getAttribute('data-compare-column-at-bottom'),
         topShadowVisible: topShadow?.className.includes('opacity-100') || false,
         bottomShadowVisible: bottomShadow?.className.includes('opacity-100') || false,
+        actionSticky: actionRow?.getAttribute('data-compare-column-action-sticky') || '',
+        actionVisibleAttr: actionRow?.getAttribute('data-compare-column-action-visible') || '',
+        actionOpacity: actionStyle?.opacity || '',
+        actionPosition: actionStyle?.position || '',
+        actionInFrameX: !!(actionRect && frameRect && actionRect.left >= frameRect.left - 2 && actionRect.right <= frameRect.right + 2),
+        actionNearFrameBottom: !!(actionRect && frameRect && Math.abs(actionRect.bottom - frameRect.bottom) <= 64),
       };
     }, target.index);
 
@@ -182,6 +193,12 @@ async function sample(page, label) {
         && columnDelta > 80
         && edgeState.canScroll === 'true'
         && edgeState.atTop === 'false'
+        && edgeState.actionSticky === 'true'
+        && edgeState.actionVisibleAttr === 'true'
+        && Number(edgeState.actionOpacity) >= 0.98
+        && edgeState.actionPosition === 'sticky'
+        && edgeState.actionInFrameX
+        && edgeState.actionNearFrameBottom
         && restoredDelta <= 8
         && consoleErrors.length === 0
         && pageErrors.length === 0,

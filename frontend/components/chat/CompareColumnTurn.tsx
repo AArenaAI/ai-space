@@ -557,7 +557,17 @@ function CompareColumnTurn({
                 </div>
               </div>
               {!isStreaming && (
-                <div className="sticky bottom-1 z-[2] mt-1 flex items-center gap-2 rounded-xl bg-surface/80 px-2 py-1 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <div
+                  data-compare-column-action-row="true"
+                  data-compare-column-action-sticky={scrollEdgeState.canScroll ? "true" : "false"}
+                  data-compare-column-action-visible={scrollEdgeState.canScroll && !scrollEdgeState.atBottom ? "true" : "false"}
+                  className={cn(
+                    "sticky bottom-1 z-[2] mt-1 flex items-center gap-2 rounded-xl border border-surface-border/50 bg-surface/86 px-2 py-1 shadow-sm backdrop-blur transition-opacity duration-150",
+                    scrollEdgeState.canScroll && !scrollEdgeState.atBottom
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+                  )}
+                >
                   <MessageActions
                     onCopy={() => onCopy(msg.content)}
                     onRegenerate={onRetryColumn || onRegenerate}
