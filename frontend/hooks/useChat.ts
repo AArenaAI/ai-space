@@ -13,6 +13,7 @@ import { useChatMainStreamRuntime } from "@/hooks/useChatMainStreamRuntime";
 import { useChatSendRuntime } from "@/hooks/useChatSendRuntime";
 import { useChatConversationRestoreRuntime } from "@/hooks/useChatConversationRestoreRuntime";
 import { useChatGenerationControlsRuntime } from "@/hooks/useChatGenerationControlsRuntime";
+import { useChatUserMessageEditRuntime } from "@/hooks/useChatUserMessageEditRuntime";
 import { useChatRuntimeCleanup } from "@/hooks/useChatRuntimeCleanup";
 import { useConversationRuntimeMessages, useConversationRuntimeSlice } from "@/hooks/useChatRuntimeSelectors";
 import {
@@ -597,6 +598,27 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     return isConversationGenerationActive(currentState);
   }, [currentConversation, generationStore, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream, hasRuntimeActiveStream, hasRuntimeGenerationTask, hasRuntimePendingOptimistic]);
 
+  const editUserMessage = useChatUserMessageEditRuntime({
+    apiBaseUrl: API_BASE_URL,
+    messages,
+    selectedModel,
+    currentConversation,
+    isCompare,
+    isLoading: isLoading || isCurrentConversationGenerating,
+    setMessages,
+    setIsLoading,
+    abortControllerRef,
+    abortReasonRef,
+    pendingLocalAssistantsRef,
+    streamResponse,
+    reasoning: lastReasoningRef.current,
+    search: lastSearchRef.current,
+    notebookId,
+    notebookFileIds,
+    skillKey: effectiveSkillKey,
+    translate: t,
+  });
+
   return {
     messages,
     isLoading,
@@ -608,6 +630,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     stopGeneration: stopCurrentConversationGeneration,
     clearMessages,
     regenerateMessage,
+    editUserMessage,
     currentConversation,
     effectiveSkillKey,
     isCompare,

@@ -59,6 +59,8 @@ export default function ChatUserContentFixture() {
           isLoading={false}
           models={models}
           conversationId={999}
+          onEditUserMessage={async () => undefined}
+          canEditUserMessages
           isLoadingMore={false}
           hasMoreMessages={false}
         />

@@ -35,6 +35,8 @@ export type ChatMessageListItemProps = {
   isFavorited: (serverMessageId: number) => boolean;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
+  onEditUserMessage?: (message: Message, content: string) => Promise<void>;
+  canEditUserMessages?: boolean;
   onForkCompare?: (messageId: number) => void;
   onSaveAssistantToNote?: (content: string) => void;
   onAssistantViewed?: (messageId: string) => void;
@@ -75,6 +77,8 @@ function ChatMessageListItem({
   isFavorited,
   onRegenerate,
   onContinueGenerate,
+  onEditUserMessage,
+  canEditUserMessages,
   onForkCompare,
   onSaveAssistantToNote,
   onAssistantViewed,
@@ -114,6 +118,8 @@ function ChatMessageListItem({
       isFavorited={isFavorited}
       onRegenerate={onRegenerate}
       onContinueGenerate={onContinueGenerate}
+      onEditUserMessage={onEditUserMessage}
+      canEditUserMessages={canEditUserMessages}
       onForkCompare={onForkCompare}
       onSaveAssistantToNote={onSaveAssistantToNote}
       onAssistantViewed={onAssistantViewed}
@@ -190,6 +196,8 @@ function areChatMessageListItemPropsEqual(previous: ChatMessageListItemProps, ne
   if (previous.conversationId !== next.conversationId) return false;
   if (previous.onAssistantViewed !== next.onAssistantViewed) return false;
   if (previous.onOpenActivity !== next.onOpenActivity) return false;
+  if (previous.onEditUserMessage !== next.onEditUserMessage) return false;
+  if (previous.canEditUserMessages !== next.canEditUserMessages) return false;
   if (previous.imageLoadFailedLabel !== next.imageLoadFailedLabel) return false;
   if (previous.MarkdownRenderer !== next.MarkdownRenderer) return false;
   if (previous.useContentVisibility !== next.useContentVisibility) return false;

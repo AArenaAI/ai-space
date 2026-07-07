@@ -745,6 +745,7 @@ const translations: Record<string, string> = {
   "chat.loadMoreHistory": "載入更多歷史訊息",
   "chat.model.fallback": "模型 {index}",
   "chat.action.copy": "複製",
+  "chat.action.edit": "編輯",
   "chat.action.regenerate": "重新生成",
   "chat.action.compare": "對比",
   "chat.action.shareSelect": "選擇分享",

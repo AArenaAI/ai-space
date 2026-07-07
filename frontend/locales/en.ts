@@ -1332,6 +1332,7 @@ const translations: Record<string, string> = {
   "chat.loadMoreHistory": "Load more history",
   "chat.model.fallback": "Model {index}",
   "chat.action.copy": "Copy",
+  "chat.action.edit": "Edit",
   "chat.action.regenerate": "Regenerate",
   "chat.action.compare": "Compare",
   "chat.action.shareSelect": "Select to share",

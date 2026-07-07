@@ -79,6 +79,8 @@ interface MessageListProps {
   conversationId?: number;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
+  onEditUserMessage?: (message: Message, content: string) => Promise<void>;
+  canEditUserMessages?: boolean;
   isCompare?: boolean;
   compareModels?: string[];
   onCompareModelChange?: (index: number, modelId: string) => void;
@@ -187,6 +189,8 @@ function MessageList({
   conversationId,
   onRegenerate,
   onContinueGenerate,
+  onEditUserMessage,
+  canEditUserMessages = false,
   isCompare = false,
   compareModels = [],
   onCompareModelChange,
@@ -2296,6 +2300,8 @@ function MessageList({
                 isFavorited={isFavorited}
                 onRegenerate={onRegenerate}
                 onContinueGenerate={onContinueGenerate}
+                onEditUserMessage={onEditUserMessage}
+                canEditUserMessages={canEditUserMessages && !effectiveIsCompare}
                 onForkCompare={onForkCompare}
                 onSaveAssistantToNote={onSaveAssistantToNote}
                 onAssistantViewed={handleAssistantViewed}

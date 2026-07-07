@@ -1333,6 +1333,7 @@ const translations: Record<string, string> = {
   "chat.loadMoreHistory": "加载更多历史消息",
   "chat.model.fallback": "模型 {index}",
   "chat.action.copy": "复制",
+  "chat.action.edit": "编辑",
   "chat.action.regenerate": "重新生成",
   "chat.action.compare": "对比",
   "chat.action.shareSelect": "选择分享",

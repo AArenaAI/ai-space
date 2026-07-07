@@ -120,6 +120,14 @@ async function assertAssistantCodeAnswerStableWhileScrolling(page) {
 
     await scrollChat(page, "bottom");
     await page.waitForFunction(() => /展开完整消息|Expand full message/.test(document.body.innerText), { timeout: 10_000 });
+    const lastUserRow = page.locator('[data-chat-message-row="true"][data-message-id="user-long"]');
+    await lastUserRow.hover();
+    await lastUserRow.locator('[data-testid="chat-user-message-edit-action"]').click();
+    await page.locator('[data-testid="chat-user-message-edit-form"]').waitFor({ state: "visible", timeout: 10_000 });
+    await assert.match(await page.locator('[data-testid="chat-user-message-edit-form"] textarea').inputValue(), /这是用户长消息第 1 行/);
+    await assert.match(await page.locator('[data-testid="chat-user-message-edit-form"]').innerText(), /保存后将重新生成/);
+    await page.keyboard.press('Escape');
+    await page.locator('[data-testid="chat-user-message-edit-form"]').waitFor({ state: "detached", timeout: 10_000 });
     const longToggle = page.locator('[data-testid="user-message-collapse-toggle"]');
     await longToggle.waitFor({ state: "visible", timeout: 10_000 });
     await assert.match(await longToggle.innerText(), /展开完整消息 · 约 1\.8k 字 \/ 48 行|Expand full message · About 1\.8k chars \/ 48 lines/);

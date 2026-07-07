@@ -750,6 +750,108 @@ func (h *ConversationHandler) GetMessage(c *gin.Context) {
 	})
 }
 
+func (h *ConversationHandler) UpdateMessage(c *gin.Context) {
+	userID := getUserID(c)
+	convID := c.Param("id")
+	messageID := c.Param("message_id")
+
+	var req struct {
+		Content       string `json:"content" binding:"required"`
+		TruncateAfter *bool  `json:"truncate_after,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "消息内容不能为空"})
+		return
+	}
+	truncateAfter := true
+	if req.TruncateAfter != nil {
+		truncateAfter = *req.TruncateAfter
+	}
+
+	var conv models.Conversation
+	if err := h.db.Where("id = ? AND user_id = ?", convID, userID).First(&conv).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "对话不存在"})
+		return
+	}
+
+	var msg models.Message
+	if err := h.db.Where("id = ? AND conversation_id = ?", messageID, conv.ID).Preload("MessageFiles").First(&msg).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "消息不存在"})
+		return
+	}
+	if msg.Role != "user" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "只能编辑用户消息"})
+		return
+	}
+
+	runningStatuses := []string{"queued", "pending", "running", "streaming", "retrying"}
+	var activeTaskCount int64
+	h.db.Model(&models.AIBackgroundTask{}).
+		Where("conversation_id = ? AND status IN ?", conv.ID, runningStatuses).
+		Count(&activeTaskCount)
+	if activeTaskCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "当前会话仍在生成中，请先停止后再编辑"})
+		return
+	}
+
+	now := time.Now()
+	deletedIDs := []uint{}
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Message{}).Where("id = ? AND conversation_id = ?", msg.ID, conv.ID).Update("content", content).Error; err != nil {
+			return err
+		}
+
+		if truncateAfter {
+			var trailing []models.Message
+			if err := tx.Where("conversation_id = ? AND (created_at > ? OR (created_at = ? AND id > ?))", conv.ID, msg.CreatedAt, msg.CreatedAt, msg.ID).
+				Order("created_at asc, id asc").
+				Find(&trailing).Error; err != nil {
+				return err
+			}
+			for _, trailingMsg := range trailing {
+				deletedIDs = append(deletedIDs, trailingMsg.ID)
+			}
+			if len(deletedIDs) > 0 {
+				if err := tx.Where("id IN ? AND conversation_id = ?", deletedIDs, conv.ID).Delete(&models.Message{}).Error; err != nil {
+					return err
+				}
+				updates := map[string]interface{}{
+					"status":        "cancelled",
+					"completed_at":  &now,
+					"error_message": "消息已被用户编辑，后续生成已作废",
+				}
+				if err := tx.Model(&models.AIBackgroundTask{}).
+					Where("assistant_message_id IN ? AND status IN ?", deletedIDs, runningStatuses).
+					Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := tx.Model(&models.Conversation{}).Where("id = ?", conv.ID).Update("updated_at", now).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新消息失败"})
+		return
+	}
+
+	msg.Content = content
+	c.JSON(http.StatusOK, gin.H{
+		"message":             msg,
+		"deleted_message_ids": deletedIDs,
+		"conversation_id":     conv.ID,
+		"updated_at":          now,
+	})
+}
+
 func (h *ConversationHandler) AddMessage(c *gin.Context) {
 	userID := getUserID(c)
 	convID := c.Param("id")

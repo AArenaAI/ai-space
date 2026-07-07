@@ -180,6 +180,7 @@ export type RunSingleChatInitOptions<TAssistant extends SingleSendMessageLike> =
   search: boolean;
   templateId: number;
   skipSaveUserMessage: boolean;
+  userMessageId?: number;
   skillKey?: string;
   messageFileIds?: string[];
   notebookFileIds?: number[];
@@ -199,6 +200,7 @@ export async function runSingleChatInit<TAssistant extends SingleSendMessageLike
   search,
   templateId,
   skipSaveUserMessage,
+  userMessageId,
   skillKey,
   messageFileIds,
   notebookFileIds,
@@ -219,6 +221,7 @@ export async function runSingleChatInit<TAssistant extends SingleSendMessageLike
         search,
         templateId,
         skipSaveUserMessage,
+        userMessageId,
         skillKey,
         messageFileIds,
         notebookFileIds,

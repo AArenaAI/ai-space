@@ -78,7 +78,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	if err := gaokaoService.EnsureSeedData(); err != nil {
 		fmt.Printf("[WARN] 高考志愿种子数据初始化失败: %v\n", err)
 	}
-	gaokaoHandler := NewGaokaoHandler(db, gaokaoService)
+	gaokaoHandler := NewGaokaoHandler(db, gaokaoService, aiService, searchService)
 
 	// 专用翻译服务（Google Cloud Translation）
 	translateService := services.NewTranslateService(cfg)
@@ -336,6 +336,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	authorized.GET("/conversations/:id/messages", convHandler.GetMessages)
 	authorized.GET("/conversations/:id/messages/:message_id", convHandler.GetMessage)
 	authorized.POST("/conversations/:id/messages", convHandler.AddMessage)
+	authorized.PATCH("/conversations/:id/messages/:message_id", convHandler.UpdateMessage)
 
 	// 笔记本知识库路由
 	authorized.GET("/notebooks", notebookHandler.List)

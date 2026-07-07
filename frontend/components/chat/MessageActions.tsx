@@ -2,13 +2,14 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Columns3, Copy, MoreHorizontal, RotateCcw, Share2, Star, StickyNote } from "lucide-react";
+import { Check, Columns3, Copy, MoreHorizontal, Pencil, RotateCcw, Share2, Star, StickyNote } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
 
 export type MessageActionsProps = {
   onCopy: () => void;
+  onEdit?: () => void;
   onRegenerate?: () => void;
   onShareSelectMode: () => void;
   onFavoriteSelectMode?: () => void;
@@ -75,6 +76,7 @@ function MessageActionsProfileProbe({
 
 function MessageActions({
   onCopy,
+  onEdit,
   onRegenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
@@ -159,6 +161,16 @@ function MessageActions({
           title={t("chat.action.regenerate")}
         >
           <RotateCcw className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {onEdit && (
+        <button
+          onClick={onEdit}
+          className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
+          title={t("chat.action.edit")}
+          data-testid="chat-user-message-edit-action"
+        >
+          <Pencil className="w-3.5 h-3.5" />
         </button>
       )}
       {onForkCompare && (

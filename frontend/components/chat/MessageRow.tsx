@@ -74,6 +74,8 @@ export type MessageRowProps = {
   isFavorited: (serverMessageId: number) => boolean;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
+  onEditUserMessage?: (message: Message, content: string) => Promise<void>;
+  canEditUserMessages?: boolean;
   onForkCompare?: (messageId: number) => void;
   onSaveAssistantToNote?: (content: string) => void;
   imageLoadFailedLabel: string;
@@ -113,6 +115,8 @@ function MessageRow({
   isFavorited,
   onRegenerate,
   onContinueGenerate,
+  onEditUserMessage,
+  canEditUserMessages,
   onForkCompare,
   onSaveAssistantToNote,
   imageLoadFailedLabel,
@@ -127,6 +131,10 @@ function MessageRow({
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   const rowRef = useRef<HTMLDivElement | null>(null);
   const profileSnapshotRef = useRef<Record<string, unknown> | null>(null);
+  const [isEditingUserMessage, setIsEditingUserMessage] = useState(false);
+  const [editDraft, setEditDraft] = useState(msg.content || "");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const isUser = msg.role === "user";
   const forceHydrateRichText = isLatestAssistant || isHighlighted;
   const skipViewportObservers = !deferOffscreenRichTextHydration && !isUser && shouldSkipViewportObserversForAssistant(msg.content);
@@ -151,6 +159,7 @@ function MessageRow({
   const isAssistantFailure = !isUser && isAssistantFailureState(assistantFailureMessage);
   const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
   const canRegenerate = !isUser && !isAssistantFailure && !msg.stopped && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const canEditUserMessage = isUser && Boolean(canEditUserMessages && onEditUserMessage && msg.serverMessageId && !isLoading && !isGenerating && !isEditingUserMessage);
   const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !runtimeState.terminal);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
@@ -281,6 +290,34 @@ function MessageRow({
     return () => observer.disconnect();
   }, [conversationId, forceHydrateRichText, forceStableRichLiteFallback, isInitialReadingAssistant, isUser, isViewedAssistant, msg.content, msg.id, onAssistantViewed, skipViewportObservers]);
 
+  useEffect(() => {
+    if (!isEditingUserMessage) setEditDraft(msg.content || "");
+  }, [isEditingUserMessage, msg.content]);
+
+  const saveUserEdit = async () => {
+    if (!onEditUserMessage || editSaving) return;
+    const next = editDraft.trim();
+    if (!next) {
+      setEditError("消息内容不能为空");
+      return;
+    }
+    if (next === (msg.content || "").trim()) {
+      setIsEditingUserMessage(false);
+      setEditError(null);
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      await onEditUserMessage(msg, next);
+      setIsEditingUserMessage(false);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "编辑消息失败");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   return (
     <div
       ref={rowRef}
@@ -370,7 +407,51 @@ function MessageRow({
             >
               {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} inlineStatus onOpenActivity={() => onOpenActivity?.(msg)} />}
               {isUser ? (
-                <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
+                isEditingUserMessage ? (
+                  <div className="w-[min(680px,calc(100vw-7rem))] max-w-full" data-testid="chat-user-message-edit-form">
+                    <textarea
+                      value={editDraft}
+                      onChange={(event) => setEditDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setIsEditingUserMessage(false);
+                          setEditError(null);
+                        }
+                        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                          event.preventDefault();
+                          void saveUserEdit();
+                        }
+                      }}
+                      className="min-h-[96px] w-full resize-y rounded-xl border border-surface-border bg-surface px-3 py-2 text-sm leading-6 text-text-primary outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+                      autoFocus
+                    />
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <p className="text-xs text-text-tertiary">保存后将重新生成这条消息之后的回答。</p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setIsEditingUserMessage(false); setEditError(null); }}
+                          className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                          disabled={editSaving}
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveUserEdit()}
+                          className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90 disabled:opacity-60"
+                          disabled={editSaving}
+                          data-testid="chat-user-message-edit-save"
+                        >
+                          {editSaving ? "保存中" : "保存并重新生成"}
+                        </button>
+                      </div>
+                    </div>
+                    {editError && <p className="mt-2 text-xs text-red-500" data-testid="chat-user-message-edit-error">{editError}</p>}
+                  </div>
+                ) : (
+                  <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
+                )
               ) : (
                 <>
                   <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} onOpenActivity={() => onOpenActivity?.(msg)} />
@@ -386,9 +467,10 @@ function MessageRow({
                 </>
               )}
             </div>
-            {!selectMode && !isStreaming && !isGenerating && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
+            {!selectMode && !isEditingUserMessage && !isStreaming && !isGenerating && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
               <MessageActions
                 onCopy={() => handleCopy(msg.content)}
+                onEdit={canEditUserMessage ? () => { setEditDraft(msg.content || ""); setEditError(null); setIsEditingUserMessage(true); } : undefined}
                 onRegenerate={onRegenerate}
                 onShareSelectMode={() => enterSelectMode("share", msg.id)}
                 onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
