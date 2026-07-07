@@ -88,6 +88,7 @@
     "test:chat-real-e2e-extra": "node scripts/regression/chat-real-e2e-extra.cjs",
     "test:chat-real-live-send-e2e": "node scripts/regression/chat-real-live-send-e2e.cjs",
     "test:chat-user-message-edit-live": "node scripts/regression/chat-user-message-edit-live.cjs",
+    "test:chat-user-message-edit-multiturn-live": "node scripts/regression/chat-user-message-edit-multiturn-live.cjs",
     "test:chat-model-selection-live": "node scripts/regression/chat-model-selection-live.cjs",
     "test:chat-bootstrap-304-live": "node scripts/regression/chat-bootstrap-304-live.cjs",
     "test:chat-page-state-live": "node scripts/regression/chat-page-state-live.cjs",

@@ -26,6 +26,7 @@
 > - `f442cb7 feat(chat): support block-level jump anchors`
 > - `4c759e7 feat(chat): keep compare actions reachable`
 > - `233c3c7 feat(chat): allow editing user messages`
+> - `99d1118 fix(chat): persist model selection across reloads`
 
 ---
 
@@ -251,7 +252,7 @@ tokenMode: stable
 
 ### 4. 模型选择要有明确“当前生效范围”
 
-**状态:** 🟡 部分完成；Compare 显式 `下一轮 / 本轮` 标签不做
+**状态:** ✅ 语义与持久化已完成；显式 `下一轮 / 本轮` 标签不做
 
 **附件目标:**
 
@@ -263,10 +264,15 @@ tokenMode: stable
 
 - 模型选择失效的根因之前已修过一部分。
 - 历史回答已有模型展示基础。
+- 2026-07-07 已修普通 Chat 已有会话切模型后刷新回退：显式切模型会同步 `conversation.model`，后端 `PUT /api/conversations/:id` 已支持 `model` 字段。
+- 普通 Chat 模型记忆已形成双层语义：`localStorage.selected-model` 作为新会话默认；已有会话以后端 `conversation.model` 为刷新 / 重开 source of truth。
+- Compare 模型记忆保持双层语义：`localStorage.compare-models` 作为本地即时状态；已有 Compare 会话以后端 `conversation.compare_models` 为刷新 / 重开 source of truth。
+- 新增稳定测试标记：`model-selector-trigger`、`model-selector-option-{modelId}`、`model-selector-provider-{provider}`、`chat-compare-toggle`。
+- 新增并修复 live 回归：`npm run test:chat-model-selection-live` 覆盖普通 Chat 和 Compare 模型选择、后端持久化、reload 恢复和下一轮 payload。
 
-**未完成:**
+**不做 / 后置:**
 
-- 普通 Chat 选择器旁的轻提示。
+- 普通 Chat 选择器旁的轻提示暂不做，避免增加视觉噪音。
 - Compare 不做顶部“下一轮模型”和历史 group“本轮模型”显式标签；只保留实际模型展示与持久化语义。
 
 **补充优化项:**
@@ -741,6 +747,7 @@ npm run test:chat-request-builder
 npm run test:chat-single-send-coordinator
 CHAT_USER_CONTENT_FIXTURE_BASE_URL=http://127.0.0.1:3000 npm run test:chat-user-content-fixture
 USER_EDIT_API_BASE_URL=http://127.0.0.1:19091 USER_EDIT_FRONTEND_BASE_URL=http://127.0.0.1:3000 USER_EDIT_MODEL=gpt-5.4-mini npm run test:chat-user-message-edit-live
+USER_EDIT_MULTI_API_BASE_URL=http://127.0.0.1:19091 USER_EDIT_MULTI_FRONTEND_BASE_URL=http://127.0.0.1:3000 USER_EDIT_MULTI_MODEL=gpt-5.4-mini npm run test:chat-user-message-edit-multiturn-live
 npm run build
 ```
 
@@ -751,6 +758,7 @@ npm run build
 - request builder / single-send coordinator ✅
 - user-content fixture：文件 chip、引用、长用户消息折叠、长代码块、编辑入口与编辑框 ✅
 - user-message-edit live：本地前端 + 本地后端新代码 + 真实测试账号 + 真实模型 `gpt-5.4-mini`；覆盖发送、编辑、PATCH 200、截断旧分支、重新生成、bootstrap 持久化、刷新恢复、无重复 user/assistant row ✅
+- user-message-edit multiturn live：三轮真实发送后编辑第 2 条；验证第 3 条 user/assistant 与第 2 条旧 assistant 被截断，UI / bootstrap / reload 均只保留“第 1 条 + 编辑后的第 2 条”分支，无旧 token、无 pending/Stop 残留 ✅
 - production build ✅
 
 **后续优化项:**
@@ -759,7 +767,7 @@ npm run build
 2. 附件编辑：需要支持 message_files 替换、file context 重新入库、RAG 上下文重算和 UI 上的附件增删。
 3. 生成中编辑：当前禁止；若要支持，应先 Stop/cancel 当前 task，再走编辑重跑，避免旧 stream 写回被删 assistant。
 4. 历史编辑确认体验：目前编辑框内提示“保存后将重新生成这条消息之后的回答”；若误触反馈多，再加轻量 confirm。
-5. Live 覆盖扩展：当前已覆盖单轮真实闭环；后续可补多轮历史中编辑第一条 / 中间条、长回答截断、以及失败恢复。
+5. Live 覆盖扩展：当前已覆盖单轮真实闭环与三轮历史中编辑第 2 条；后续可补编辑第一条、长回答截断、以及失败恢复。
 
 ---
 
