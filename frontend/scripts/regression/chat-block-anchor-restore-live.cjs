@@ -53,7 +53,10 @@ async function sampleAnchor(page) {
   const auth = await login({ baseUrl });
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  if (auth.refreshToken) await context.addCookies([{ name: 'ai_space_refresh_token', value: auth.refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: baseUrl.startsWith('https:'), sameSite: 'Lax' }]);
+  const cookies = [];
+  if (auth.sessionToken) cookies.push({ name: 'ai_space_session', value: auth.sessionToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: baseUrl.startsWith('https:'), sameSite: 'Lax' });
+  if (auth.refreshToken) cookies.push({ name: 'ai_space_refresh_token', value: auth.refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: baseUrl.startsWith('https:'), sameSite: 'Lax' });
+  if (cookies.length) await context.addCookies(cookies);
   const page = await context.newPage();
   const consoleEvents = [];
   const pageErrors = [];

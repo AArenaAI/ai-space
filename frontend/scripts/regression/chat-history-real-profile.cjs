@@ -52,12 +52,18 @@ async function fetchJson(url, init) {
 }
 
 async function login() {
-  const data = await fetchJson(`${apiBaseUrl}/api/auth/login`, {
+  const res = await fetch(`${apiBaseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${apiBaseUrl}/api/auth/login -> ${res.status} ${redact(text.slice(0, 500))}`);
+  const data = JSON.parse(text);
   assert.ok(data.token, "login response missing token");
+  const setCookie = res.headers.get("set-cookie") || "";
+  data.sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || "";
+  data.refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || "";
   return data;
 }
 
@@ -327,7 +333,13 @@ async function main() {
   const proxy = await startProxy(requestStats);
   const proxyBase = `http://127.0.0.1:${proxyPort}`;
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const proxyHost = new URL(proxyBase).hostname;
+  const cookies = [];
+  if (auth.sessionToken) cookies.push({ name: "ai_space_session", value: auth.sessionToken, domain: proxyHost, path: "/", httpOnly: true, secure: false, sameSite: "Lax" });
+  if (auth.refreshToken) cookies.push({ name: "ai_space_refresh_token", value: auth.refreshToken, domain: proxyHost, path: "/", httpOnly: true, secure: false, sameSite: "Lax" });
+  if (cookies.length) await context.addCookies(cookies);
+  const page = await context.newPage();
   const issues = [];
 
   page.on("console", (msg) => {
@@ -394,6 +406,9 @@ async function main() {
     const topDelta = anchorBefore.found && anchorAfter.found ? Math.abs(anchorAfter.visibleTop - anchorBefore.visibleTop) : null;
     const settleTopDelta = anchorBefore.found && anchorAfterSettle.found ? Math.abs(anchorAfterSettle.visibleTop - anchorBefore.visibleTop) : null;
     const releasedVisibleCount = Math.max(0, afterPrepend.list.visibleMessageCount - beforePrepend.list.visibleMessageCount);
+    const beforeHiddenCount = Math.max(0, (beforePrepend.list.allVisibleMessageCount || 0) - (beforePrepend.list.visibleMessageCount || 0));
+    const afterHiddenCount = Math.max(0, (afterPrepend.list.allVisibleMessageCount || 0) - (afterPrepend.list.visibleMessageCount || 0));
+    const releasedHiddenCount = Math.max(0, beforeHiddenCount - afterHiddenCount);
     const changedLocalWindow = releasedVisibleCount > 0 || releasedHiddenCount > 0;
     const postPrependEvents = summarizeEvents(events, prependStartedAt);
     const postPrependLongTasks = longTasks.filter((entry) => entry.startTime >= prependStartedAt);

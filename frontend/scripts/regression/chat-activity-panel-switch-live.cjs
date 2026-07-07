@@ -71,8 +71,8 @@ async function openActivityPanel(page) {
 }
 
 function extractReasoningFromPanelText(text) {
-  const after = text.split(/(?:思考过程|深度推理|Reasoning|Reasoned)[^\n]*/).slice(1).join('');
-  return after.split(/(?:回答完成|Generated|参考来源|网页 ·|Web ·|来源 1|Source 1)/)[0] || '';
+  const after = text.split(/(?:模型思考|思考过程|深度推理|Reasoning|Reasoned)[^\n]*/).slice(1).join('');
+  return after.split(/(?:回答完成|Generated|参考来源|参考来源 ·|按域名聚合|网页 ·|Web ·|来源 1|Source 1)/)[0] || '';
 }
 
 async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
