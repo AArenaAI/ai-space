@@ -838,6 +838,14 @@ function MessageList({
           scrollHeight: el.scrollHeight,
           scrollTop: el.scrollTop,
         };
+        emitChatRenderProfileEvent("message-list-load-more-anchor-capture", {
+          conversationId,
+          messageId,
+          top: Math.round(firstVisibleRow.getBoundingClientRect().top),
+          scrollTop: Math.round(el.scrollTop),
+          scrollHeight: Math.round(el.scrollHeight),
+          visibleMessageCount: visibleMessageCountRef.current,
+        });
         // Start prepend settling before the remote page mutates the DOM so the
         // browser's own overflow-anchor does not pre-apply the height delta.
         markHistoryPrependSettling(isCompare ? 1600 : 900);
@@ -1288,6 +1296,16 @@ function MessageList({
       // only scrollTop writer. This preserves the visible row without the old
       // scrollHeight-delta jump/double-anchoring behavior.
       const delta = row.getBoundingClientRect().top - anchor.top;
+      emitChatRenderProfileEvent("message-list-load-more-anchor-restore", {
+        conversationId,
+        messageId: anchor.messageId,
+        source: anchor.source,
+        anchorTop: Math.round(anchor.top),
+        rowTop: Math.round(row.getBoundingClientRect().top),
+        delta: Math.round(delta),
+        scrollTop: Math.round(el.scrollTop),
+        visibleMessageCount: visibleMessages.length,
+      });
       if (Math.abs(delta) > 4) {
         el.scrollTop += delta;
         lastScrollTopRef.current = el.scrollTop;
