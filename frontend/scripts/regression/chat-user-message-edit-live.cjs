@@ -127,7 +127,19 @@ async function sampleRows(page) {
     await userRow.hover();
     await userRow.locator('[data-testid="chat-user-message-edit-action"]').click({ timeout: 15000 });
     await page.locator('[data-testid="chat-user-message-edit-form"] textarea').fill(editedPrompt);
+    const patchPromise = page.waitForResponse((res) => res.request().method() === 'PATCH' && /\/api\/conversations\/\d+\/messages\/\d+/.test(res.url()), { timeout: 30000 });
+    const initPromise = page.waitForResponse((res) => res.request().method() === 'POST' && /\/api\/chat\/init/.test(res.url()), { timeout: 30000 });
     await page.locator('[data-testid="chat-user-message-edit-save"]').click();
+    const patchResponse = await patchPromise;
+    const initResponse = await initPromise;
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="chat-user-message-edit-form"]').length === 0, undefined, { timeout: 10000 });
+    report.afterEditAccepted = await sampleRows(page);
+    assert.equal(patchResponse.status(), 200, `PATCH edit did not return 200: ${patchResponse.status()}`);
+    assert.equal([200, 202].includes(initResponse.status()), true, `chat init did not return success: ${initResponse.status()}`);
+    assert.equal(report.afterEditAccepted.editForms, 0, 'edit form should close once regeneration is accepted, before waiting for assistant completion');
+    assert.equal(report.afterEditAccepted.userRows.length, 1, `after accepted user row count: ${report.afterEditAccepted.userRows.length}`);
+    assert.equal(report.afterEditAccepted.userRows[0].text.includes(editedToken), true, 'accepted edited user row should contain edited prompt token');
+    assert.equal(report.afterEditAccepted.bodyTail.includes('保存中'), false, 'save label should not remain visible after regeneration starts');
     await waitForUiAnswer(page, editedToken);
     report.afterEdit = await sampleRows(page);
 

@@ -196,7 +196,30 @@ export function useChatUserMessageEditRuntime({
         const errorBody = await streamRes.json().catch(() => ({}));
         throw new Error(errorBody.message || errorBody.error || "连接生成任务失败");
       }
-      await streamResponse(streamRes, serverAssistant, controller, currentConversation);
+
+      // The edit save action is complete once the edited user row is persisted
+      // and regeneration has been accepted/started. Keep streaming in the
+      // background so the user bubble exits the "保存中" form while the assistant
+      // visibly replies, instead of conflating save state with generation state.
+      void streamResponse(streamRes, serverAssistant, controller, currentConversation)
+        .catch((error) => {
+          setMessages((prev) => prev.map((item) => item.id === activeAssistantId || item.id === localAssistant.id ? {
+            ...item,
+            errorCode: "edit_regenerate_failed",
+            retryable: true,
+            content: error instanceof Error ? error.message : "重新生成失败",
+            completedAt: now(),
+          } : item));
+        })
+        .finally(() => {
+          if (pendingLocalAssistantsRef) {
+            delete pendingLocalAssistantsRef.current[activeAssistantId];
+          }
+          setIsLoading(false);
+          abortControllerRef.current = null;
+          abortReasonRef.current = null;
+          syncEditedMessagesToRuntime(currentConversation, chatRuntimeStore.getConversation(currentConversation).messages as Message[], buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation));
+        });
     } catch (error) {
       setMessages((prev) => prev.map((item) => item.id === activeAssistantId || item.id === localAssistant.id ? {
         ...item,
@@ -205,8 +228,6 @@ export function useChatUserMessageEditRuntime({
         content: error instanceof Error ? error.message : "重新生成失败",
         completedAt: now(),
       } : item));
-      throw error;
-    } finally {
       if (pendingLocalAssistantsRef) {
         delete pendingLocalAssistantsRef.current[activeAssistantId];
       }
@@ -214,6 +235,7 @@ export function useChatUserMessageEditRuntime({
       abortControllerRef.current = null;
       abortReasonRef.current = null;
       syncEditedMessagesToRuntime(currentConversation, chatRuntimeStore.getConversation(currentConversation).messages as Message[], buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation));
+      throw error;
     }
   }, [abortControllerRef, abortReasonRef, apiBaseUrl, createId, currentConversation, dispatchWindowEvent, isCompare, isLoading, messages, notebookFileIds, notebookId, now, pendingLocalAssistantsRef, reasoning, search, selectedModel.id, setIsLoading, setMessages, skillKey, streamResponse, translate]);
 }
