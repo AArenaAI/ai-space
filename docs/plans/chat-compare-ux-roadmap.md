@@ -3,7 +3,7 @@
 > **来源:** 2026-07-03 用户粘贴的 Chat/Compare 后续优化清单。
 > **目标:** 按“稳定感 → 可控感 → 阅读效率 → 长远架构”推进 Chat / Compare，不再零散修 bug。
 > **文档定位:** 本文件是路线图；回测标准放在 `docs/testing/`；具体实施方案放在 `docs/plans/*-plan.md`。
-> **最近更新:** 2026-07-06，根据 Chat pending / accepted send / Compare live / P3 阅读定位、Compare 长回答操作回归与 P4 侧栏历史 optimistic pipeline 刷新状态。
+> **最近更新:** 2026-07-07，根据用户消息二次编辑（普通 Chat、截断后续并重新生成）实现与验证结果刷新状态。
 > **状态口径:**
 > - ✅ 已完成：已有提交、回归或线上验证支撑。
 > - 🟡 部分完成：已有基础能力或局部修复，但还未达到目标体验。
@@ -25,6 +25,7 @@
 > - `f9c912b feat(chat): highlight exact message jumps and lock block markdown`
 > - `f442cb7 feat(chat): support block-level jump anchors`
 > - `4c759e7 feat(chat): keep compare actions reachable`
+> - `233c3c7 feat(chat): allow editing user messages`
 
 ---
 
@@ -37,6 +38,7 @@
 | P3 | 阅读效率 | ✅/🟡 | 桌面 Chat/Compare 阅读定位主线已完成：message 精确回跳、block-level jump、高亮、code/table block-local 回归、Compare 长回答 action 可达；移动端 Compare 与收藏片段仍后置。 |
 | P4 | 侧栏/历史体验 | ✅ | `useChatSidebarHistory` 已抽出并补齐 optimistic pipeline：新会话 temp→canonical 原地替换、标题弱 pending、active 高亮连续、rename/delete/pin 统一更新、load-more 锚点保护与 fixture 覆盖。 |
 | P5 | 长期状态架构 | ✅/🟡 | Runtime 基础与 adapter 写入主线已完成：ConversationRuntimeStore、StreamOwnerRegistry、mergeConversationSnapshot、create/restore/send/main/task/poll/generation controls/lifecycle/local actions/top-level resume-stop 均已同步 runtime store，并有 architecture/runtime/live 回归；后续只剩更大范围的 UI 读路径订阅 store（不再属于 adapter 收口）。 |
+| P6 | 用户消息二次编辑 | ✅/🟡 | 普通 Chat user message 已支持编辑：后端 PATCH 持久化、截断后续、复用 `skip_save_user_msg + user_message_id` 重新生成、runtime store 同步与 fixture 覆盖；Compare/附件替换/生成中编辑后置。 |
 
 ---
 
@@ -674,6 +676,88 @@ conversationId -> activeStreams
 - `useChatConversationRestoreRuntime` 在 backend restore response 应用前先执行 merge decision；拒绝时保留当前 UI/cache，只关闭 loading history。
 - 新增 `restore-merge-rejected` performance event，透出 rejected reason，便于后续调试 stale bootstrap/restore。
 - 回归覆盖：active stream 拒绝 stale restore、bootstrap 不覆盖 optimistic local、terminal backend status 可替换 running local task、hook 在应用 backend restore state 前调用 decision。
+
+---
+
+## 优先级 6：用户消息二次编辑
+
+### 15. 普通 Chat 用户消息编辑后重跑
+
+**状态:** ✅ 第一版已完成；Compare / 附件替换 / 生成中编辑后置
+
+**已完成提交:**
+
+```text
+233c3c7 feat(chat): allow editing user messages
+```
+
+**第一版边界:**
+
+- 仅支持普通 Chat 的 `role=user` 消息。
+- 非 Compare、非生成中才显示编辑入口。
+- 只编辑文字内容；原 `message_files` / 附件保留，不支持替换附件。
+- 保存后会截断这条用户消息之后的所有消息，并重新生成 assistant；不保留旧后续回答。
+- 不支持 assistant 消息编辑。
+
+**实现要点:**
+
+- 后端新增：
+
+```http
+PATCH /api/conversations/:id/messages/:message_id
+```
+
+- 请求体：
+
+```json
+{ "content": "新的用户消息内容", "truncate_after": true }
+```
+
+- 后端校验：conversation 归属当前用户、message 属于 conversation、只能编辑 user message、content 非空、会话有 running/pending/streaming/retrying task 时返回 409。
+- 后端动作：更新 user message content，soft delete 后续 messages，更新 `conversation.updated_at`，返回 `deleted_message_ids`。
+- 前端新增 `useChatUserMessageEditRuntime`：先 PATCH 编辑接口，再本地/runtime 截断消息，插入新 assistant pending，调用 `/api/chat/init`。
+- 重新生成必须传：
+
+```json
+{
+  "skip_save_user_msg": true,
+  "user_message_id": "edited user serverMessageId"
+}
+```
+
+这样后端复用已编辑的 user row，不会重复保存用户消息。
+- 生成继续走 server-first task stream：`/api/tasks/:task_id/stream?after=0`。
+
+**已验证:**
+
+```bash
+cd backend
+# gofmt 已执行
+go test ./internal/api ./internal/models
+
+cd frontend
+npx tsc --noEmit --pretty false
+npm run test:chat-request-builder
+npm run test:chat-single-send-coordinator
+CHAT_USER_CONTENT_FIXTURE_BASE_URL=http://127.0.0.1:3000 npm run test:chat-user-content-fixture
+npm run build
+```
+
+通过结果：
+
+- backend API / models tests ✅
+- frontend typecheck ✅
+- request builder / single-send coordinator ✅
+- user-content fixture：文件 chip、引用、长用户消息折叠、长代码块、编辑入口与编辑框 ✅
+- production build ✅
+
+**后续优化项:**
+
+1. Compare 历史 shared prompt 编辑：需要重新定义 `MessageGroup`、双列 assistant、`group_models`、column owner、retry column 的截断/重建语义，不能复用普通 Chat 的简单截断。
+2. 附件编辑：需要支持 message_files 替换、file context 重新入库、RAG 上下文重算和 UI 上的附件增删。
+3. 生成中编辑：当前禁止；若要支持，应先 Stop/cancel 当前 task，再走编辑重跑，避免旧 stream 写回被删 assistant。
+4. 历史编辑确认体验：目前编辑框内提示“保存后将重新生成这条消息之后的回答”；若误触反馈多，再加轻量 confirm。
+5. Live 覆盖：补真实登录流 `send -> edit first user -> save -> no duplicated user row -> restored history only has edited branch`。
 
 ---
 
