@@ -43,6 +43,34 @@ function resolveAnswerRenderState({
   return runtimeState.content?.trim() ? "completed-stable" : "pending";
 }
 
+function resolveGenerationPhase({
+  generating,
+  runtimeState,
+}: {
+  generating: boolean;
+  runtimeState: ChatMessageRuntimeState;
+}): "pending" | "reasoning" | "answering" | "completed" | "empty" {
+  const runningTimelineSteps = runtimeState.statusTimeline?.filter((step) => step.status === "running") || [];
+  const hasRunningReasoning = runningTimelineSteps.some((step) => step.kind === "reasoning");
+  const hasRunningAnswer = runningTimelineSteps.some((step) => step.kind === "streaming_answer");
+  const parsedRuntimeContent = parseThinkContent(runtimeState.content || "");
+  const hasReasoning = Boolean(runtimeState.reasoningContent?.trim() || parsedRuntimeContent.reasoning?.trim())
+    || runtimeState.phase === "reasoning"
+    || runtimeState.phase === "thinking"
+    || hasRunningReasoning;
+  const hasAnswer = Boolean((runtimeState.answerContent || parsedRuntimeContent.answer || "").trim())
+    || runtimeState.phase === "streaming_answer"
+    || runtimeState.phase === "generating"
+    || hasRunningAnswer;
+  if (generating) {
+    if (hasAnswer) return "answering";
+    if (hasReasoning) return "reasoning";
+    return "pending";
+  }
+  if (runtimeState.terminal || hasReasoning || hasAnswer) return "completed";
+  return "empty";
+}
+
 export function AssistantAnswerRenderer({
   message,
   runtimeState,
@@ -75,6 +103,7 @@ export function AssistantAnswerRenderer({
   t: (key: string, params?: Record<string, string>) => string;
 }) {
   const renderState = resolveAnswerRenderState({ generating, runtimeState, shouldRenderStreamingText });
+  const generationPhase = resolveGenerationPhase({ generating, runtimeState });
 
   if (shouldRenderStreamingText) {
     const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
@@ -104,6 +133,7 @@ export function AssistantAnswerRenderer({
           preferCanonicalContent={runtimeState.terminalSource === "message"}
           className="text-[15px] leading-relaxed text-text-primary"
           onOpenActivity={onOpenActivity}
+          runtimePhase={generationPhase}
         />
       </div>
     );

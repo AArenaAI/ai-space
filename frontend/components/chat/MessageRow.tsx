@@ -408,7 +408,10 @@ function MessageRow({
               {!isUser && model && !selectMode && <AssistantMessageMeta msg={msg} isStreaming={isStreaming} model={model} compact={isEmptyPendingAssistant} inlineStatus onOpenActivity={() => onOpenActivity?.(msg)} />}
               {isUser ? (
                 isEditingUserMessage ? (
-                  <div className="w-[min(680px,calc(100vw-7rem))] max-w-full" data-testid="chat-user-message-edit-form">
+                  <div
+                    className="relative w-[min(680px,calc(100vw-7rem))] max-w-full rounded-2xl bg-surface-elevated p-4 border border-surface-border/50"
+                    data-testid="chat-user-message-edit-form"
+                  >
                     <textarea
                       value={editDraft}
                       onChange={(event) => setEditDraft(event.target.value)}
@@ -422,30 +425,27 @@ function MessageRow({
                           void saveUserEdit();
                         }
                       }}
-                      className="min-h-[96px] w-full resize-y rounded-xl border border-surface-border bg-surface px-3 py-2 text-sm leading-6 text-text-primary outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+                      className="min-h-[120px] w-full resize-y rounded-xl border-0 bg-transparent px-0 py-0 text-base leading-7 text-text-primary outline-none pr-28 pb-12"
                       autoFocus
                     />
-                    <div className="mt-2 flex items-center justify-between gap-3">
-                      <p className="text-xs text-text-tertiary">保存后将重新生成这条消息之后的回答。</p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setIsEditingUserMessage(false); setEditError(null); }}
-                          className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary"
-                          disabled={editSaving}
-                        >
-                          取消
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void saveUserEdit()}
-                          className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90 disabled:opacity-60"
-                          disabled={editSaving}
-                          data-testid="chat-user-message-edit-save"
-                        >
-                          {editSaving ? "保存中" : "保存并重新生成"}
-                        </button>
-                      </div>
+                    <div className="absolute bottom-4 right-4 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setIsEditingUserMessage(false); setEditError(null); }}
+                        className="rounded-lg border border-surface-border bg-surface px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-surface-hover transition-colors"
+                        disabled={editSaving}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void saveUserEdit()}
+                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 transition-colors"
+                        disabled={editSaving}
+                        data-testid="chat-user-message-edit-save"
+                      >
+                        {editSaving ? "发送中" : "发送"}
+                      </button>
                     </div>
                     {editError && <p className="mt-2 text-xs text-red-500" data-testid="chat-user-message-edit-error">{editError}</p>}
                   </div>

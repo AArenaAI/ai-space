@@ -152,6 +152,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		publicWithAuth.POST("/gaokao/recommend", gaokaoHandler.Recommend)
 		publicWithAuth.POST("/gaokao/advisor", gaokaoHandler.Advisor)
 		publicWithAuth.POST("/gaokao/advisor/stream", gaokaoHandler.AdvisorStream)
+		publicWithAuth.POST("/gaokao/guide", gaokaoHandler.Guide)
 		publicWithAuth.POST("/gaokao/volunteer-table", gaokaoHandler.VolunteerTable)
 		publicWithAuth.POST("/gaokao/agent-adjust", gaokaoHandler.AgentAdjust)
 		publicWithAuth.POST("/gaokao/risk-check", gaokaoHandler.RiskCheck)

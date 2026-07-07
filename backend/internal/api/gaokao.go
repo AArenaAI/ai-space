@@ -17,12 +17,14 @@ import (
 )
 
 type GaokaoHandler struct {
-	db      *gorm.DB
-	service *services.GaokaoService
+	db            *gorm.DB
+	service       *services.GaokaoService
+	aiService     chatAIService
+	searchService *services.SearchService
 }
 
-func NewGaokaoHandler(db *gorm.DB, service *services.GaokaoService) *GaokaoHandler {
-	return &GaokaoHandler{db: db, service: service}
+func NewGaokaoHandler(db *gorm.DB, service *services.GaokaoService, aiService chatAIService, searchService *services.SearchService) *GaokaoHandler {
+	return &GaokaoHandler{db: db, service: service, aiService: aiService, searchService: searchService}
 }
 
 type gaokaoRecommendRequest struct {
@@ -38,6 +40,56 @@ type gaokaoRecommendRequest struct {
 	AcceptCooperation bool     `json:"accept_cooperation"`
 	ObeyAdjustment    bool     `json:"obey_adjustment"`
 	Strategy          string   `json:"strategy"`
+}
+
+type gaokaoGuideRequest struct {
+	Mode    string              `json:"mode"`
+	Answers map[string][]string `json:"answers"`
+}
+
+func (h *GaokaoHandler) Guide(c *gin.Context) {
+	var req gaokaoGuideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if h.aiService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AIService 未注入"})
+		return
+	}
+	payload, _ := json.MarshalIndent(req.Answers, "", "  ")
+	mode := strings.TrimSpace(req.Mode)
+	focus := "综合推荐：只输出城市×专业×学校层次×风险策略的组合建议。"
+	if strings.Contains(mode, "城市") {
+		focus = "城市推荐：只输出城市/区域建议，不要给专业推荐和综合填报方案。"
+	} else if strings.Contains(mode, "专业") {
+		focus = "专业推荐：只输出专业方向建议，不要给城市推荐和综合填报方案。"
+	}
+	prompt := fmt.Sprintf(`你是高考志愿规划顾问。用户正在填写%s问卷，请基于答案联网生成专属建议。
+核心边界：%s
+硬性要求：
+1. 只返回严格 JSON，不要 Markdown，不要代码块，不要链接 URL，不要 utm_source/openai 等乱码。
+2. JSON schema：{"title":"","summary":"","table_columns":[""],"table_rows":[{"name":"","score":0,"cells":[""]}],"bar_chart":{"title":"","items":[{"label":"","value":0}]},"pie_chart":{"title":"","items":[{"label":"","value":0}]},"trend_chart":{"title":"","items":[{"label":"","value":0}]},"next_steps":[""]}。
+3. table_rows 至少 6 行，score 0-100；cells 数量必须等于 table_columns 数量。
+4. bar_chart 用于匹配度，pie_chart 用于因素权重，trend_chart 用于长期发展/风险趋势。
+5. 内容要具体、全面、可执行，但不要混入其它入口类型的结果。
+
+问卷答案 JSON：
+%s`, mode, focus, string(payload))
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 300_000_000_000)
+	defer cancel()
+	text, err := callGaokaoAITextWithSearchContext(ctx, h.aiService, h.searchService, "gpt-5.5", []services.Message{{Role: "system", Content: "你是专业高考志愿规划师，回答清晰具体。"}, {Role: "user", Content: prompt}}, true)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	clean := extractGaokaoAIJSONObject(text)
+	var guide any
+	if err := json.Unmarshal([]byte(clean), &guide); err != nil {
+		c.JSON(http.StatusOK, gin.H{"markdown": strings.TrimSpace(text)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"guide": guide})
 }
 
 func (h *GaokaoHandler) Recommend(c *gin.Context) {
@@ -120,14 +172,28 @@ func (h *GaokaoHandler) Advisor(c *gin.Context) {
 		modelRecommendations = append(modelRecommendations, services.BuildGaokaoProfessionalSeedRecommendations(profile)...)
 		modelRecommendations = append(modelRecommendations, services.ExternalCandidatePlanToGaokaoRecommendations(profile, advisor.ExternalCandidatePlan)...)
 	}
-	if strings.ToLower(provider) != "none" {
-		reports := runGaokaoAdvisorModelCommittee(c.Request.Context(), provider, profile, message, modelRecommendations, nil)
-		advisor.ModelReports = reports
-		advisor.AgentAnalysis = services.MergeGaokaoAdvisorModelReports(reports, advisor.AgentAnalysis)
-		advisor.ModelStatus = summarizeGaokaoAdvisorModelReports(reports)
-		advisor.ModelNote = "多模型委员会基于本地候选；本地为空时基于联网待复核候选做取舍/风险分析，不得生成录取线事实。"
-	}
 	advisor.ProfessionalReport = services.BuildGaokaoProfessionalReport(profile, modelRecommendations, advisor.EvidenceLinks)
+	advisor.FinalReportMarkdown = services.BuildGaokaoFinalReportMarkdown(profile, "", advisor.ProfessionalReport, advisor.EvidenceLinks)
+	if strings.ToLower(provider) != "none" {
+		reportCtx, cancel := context.WithTimeout(c.Request.Context(), 480_000_000_000)
+		md, status, aiErr := generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		if aiErr == nil && strings.TrimSpace(md) != "" {
+			advisor.FinalReportMarkdown = md
+			advisor.ModelStatus = status
+			advisor.ModelNote = "已通过统一 AIService 生成：GPT-5.5联网生成候选和数据 → DeepSeek生成逐校搜索查询并联网复核/补充学校 → 后端执行结构化结果 → GPT-5.5联网整理终稿 → 全文后检。"
+		} else if status == "postcheck_failed" || status == "deepseek_web_verify_failed" {
+			advisor.ModelStatus = status
+			advisor.ModelNote = "AIService/DeepSeek 复核未通过，未展示未核验推荐：" + aiErr.Error()
+			advisor.FinalReportMarkdown = "# 高考志愿规划报告\n\nDeepSeek 联网逐校复核未能确认足够的明确最低位次，因此本次不输出院校推荐表。\n\n请稍后重试，或补充考试院/高校招生网的官方投档表后再生成。"
+		} else if md, status, err := services.GenerateGaokaoFinalReportMarkdown(reportCtx, profile, message, track, modelRecommendations, advisor.EvidenceLinks); err == nil && strings.TrimSpace(md) != "" {
+			advisor.FinalReportMarkdown = md
+			advisor.ModelStatus = status
+			advisor.ModelNote = "统一 AIService 不可用，已使用旧模型终稿兜底。"
+		} else if err != nil {
+			advisor.ModelNote = "模型终稿生成失败，已展示结构化兜底报告：" + err.Error()
+		}
+		cancel()
+	}
 	c.JSON(http.StatusOK, advisor)
 }
 
@@ -198,16 +264,31 @@ func (h *GaokaoHandler) AdvisorStream(c *gin.Context) {
 		modelRecommendations = append(modelRecommendations, services.BuildGaokaoProfessionalSeedRecommendations(profile)...)
 		modelRecommendations = append(modelRecommendations, services.ExternalCandidatePlanToGaokaoRecommendations(profile, advisor.ExternalCandidatePlan)...)
 	}
-	if strings.ToLower(provider) != "none" {
-		reports := runGaokaoAdvisorModelCommittee(c.Request.Context(), provider, profile, message, modelRecommendations, emit)
-		advisor.ModelReports = reports
-		advisor.AgentAnalysis = services.MergeGaokaoAdvisorModelReports(reports, advisor.AgentAnalysis)
-		advisor.ModelStatus = summarizeGaokaoAdvisorModelReports(reports)
-		advisor.ModelNote = "多模型委员会基于本地候选；本地为空时基于联网待复核候选做取舍/风险分析，不得生成录取线事实。"
-		emit("model_committee", gin.H{"status": advisor.ModelStatus, "reports": reports, "analysis": advisor.AgentAnalysis})
-	}
 	advisor.ProfessionalReport = services.BuildGaokaoProfessionalReport(profile, modelRecommendations, advisor.EvidenceLinks)
+	advisor.FinalReportMarkdown = services.BuildGaokaoFinalReportMarkdown(profile, "", advisor.ProfessionalReport, advisor.EvidenceLinks)
 	emit("professional_report", advisor.ProfessionalReport)
+	if strings.ToLower(provider) != "none" {
+		emit("report_generating", gin.H{"stage": "生成候选、逐校搜索并硬过滤", "progress": 68})
+		reportCtx, cancel := context.WithTimeout(c.Request.Context(), 480_000_000_000)
+		md, status, aiErr := generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		if aiErr == nil && strings.TrimSpace(md) != "" {
+			advisor.FinalReportMarkdown = md
+			advisor.ModelStatus = status
+			advisor.ModelNote = "已通过统一 AIService 生成：GPT-5.5联网生成候选和数据 → DeepSeek生成逐校搜索查询并联网复核/补充学校 → 后端执行结构化结果 → GPT-5.5联网整理终稿 → 全文后检。"
+		} else if status == "postcheck_failed" || status == "deepseek_web_verify_failed" {
+			advisor.ModelStatus = status
+			advisor.ModelNote = "AIService/DeepSeek 复核未通过，未展示未核验推荐：" + aiErr.Error()
+			advisor.FinalReportMarkdown = "# 高考志愿规划报告\n\nDeepSeek 联网逐校复核未能确认足够的明确最低位次，因此本次不输出院校推荐表。\n\n请稍后重试，或补充考试院/高校招生网的官方投档表后再生成。"
+		} else if md, status, err := services.GenerateGaokaoFinalReportMarkdown(reportCtx, profile, message, track, modelRecommendations, advisor.EvidenceLinks); err == nil && strings.TrimSpace(md) != "" {
+			advisor.FinalReportMarkdown = md
+			advisor.ModelStatus = status
+			advisor.ModelNote = "统一 AIService 不可用，已使用旧模型终稿兜底。"
+		} else if err != nil {
+			advisor.ModelNote = "模型终稿生成失败，已展示结构化兜底报告：" + err.Error()
+		}
+		cancel()
+	}
+	emit("final_report_markdown", gin.H{"markdown": advisor.FinalReportMarkdown})
 	emit("plan_ready", gin.H{"plans": advisor.FinalPlans, "analysis": advisor.AgentAnalysis})
 	emit("done", advisor)
 }

@@ -116,7 +116,7 @@ func validGaokaoAdvisorSchoolName(name string) bool {
 	if len([]rune(name)) < 4 || len([]rune(name)) > 24 {
 		return false
 	}
-	bad := []string{"录取", "分数线", "最低", "最高", "本科压线", "各大学", "院校名单"}
+	bad := []string{"录取", "分数线", "最低", "最高", "本科压线", "各大学", "院校名单", "排名", "前五", "前十", "名单", "哪些大学"}
 	for _, b := range bad {
 		if strings.Contains(name, b) {
 			return false

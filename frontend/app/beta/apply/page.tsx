@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, Briefcase, CheckCircle, FileText, Loader2, Mail, Send, Sparkles, User } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api/client";
 
 const INDUSTRIES = [
   { value: "金融", label: "金融从业", icon: "💰" },
@@ -45,9 +46,8 @@ export default function BetaApplyPage() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch("/api/beta/apply", {
+      const res = await apiFetch("/beta/apply", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
       const data = await res.json().catch(() => ({}));

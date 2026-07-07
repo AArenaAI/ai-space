@@ -488,3 +488,24 @@ func TestProfessionalSeedRecommendationsFeedModel(t *testing.T) {
 		t.Fatalf("expected 桂林电子科技大学 with major/rank/source in %#v", recs)
 	}
 }
+
+func TestInvalidNarrativeSchoolNameFiltered(t *testing.T) {
+	if validGaokaoAdvisorSchoolName("排名前五的民办本科大学") {
+		t.Fatalf("narrative pseudo-school name should be rejected")
+	}
+}
+
+func TestBuildGaokaoFinalReportMarkdownHidesProducerTerms(t *testing.T) {
+	profile := GaokaoProfile{Province: "安徽", Subjects: "物理 / 化学", Score: 583, Rank: 40983, PreferredMajors: []string{"自动化", "电子信息工程", "集成电路"}, Strategy: "major"}
+	recs := BuildGaokaoProfessionalSeedRecommendations(profile)
+	report := BuildGaokaoProfessionalReport(profile, recs, nil)
+	markdown := BuildGaokaoFinalReportMarkdown(profile, "", report, nil)
+	if markdown == "" || !strings.Contains(markdown, "志愿规划报告") || !strings.Contains(markdown, "考生画像") || !strings.Contains(markdown, "最终建议") {
+		t.Fatalf("final markdown missing report sections: %q", markdown)
+	}
+	for _, bad := range []string{"deepseek", "openai", "多模型", "model", "provider"} {
+		if strings.Contains(strings.ToLower(markdown), bad) {
+			t.Fatalf("final markdown leaks producer term %q: %s", bad, markdown)
+		}
+	}
+}

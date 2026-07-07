@@ -130,7 +130,7 @@ func buildGaokaoProfessionalReportItem(profile GaokaoProfile, rec GaokaoRecommen
 		School:              rec.School,
 		City:                rec.City,
 		RecommendedMajors:   majors,
-		SchoolLevel:         strings.Join(nonEmptyStrings(rec.DualClass, rec.Level, rec.Type), " "),
+		SchoolLevel:         canonicalGaokaoSchoolLevel(rec.School, rec.DualClass, rec.Level, rec.Type),
 		EngineeringStrength: estimateGaokaoEngineeringStrength(rec),
 		StrengthTags:        strengthTagsForGaokaoReport(rec.School, majors),
 		WhyRecommend:        whyRecommendGaokaoReport(rec.School, majors),
@@ -140,6 +140,37 @@ func buildGaokaoProfessionalReportItem(profile GaokaoProfile, rec GaokaoRecommen
 		Advice:              adviceGaokaoReport(rec.Band, gap),
 		SourceNote:          rec.Source,
 	}
+}
+
+func canonicalGaokaoSchoolLevel(school, dualClass, level, t string) string {
+	if strings.Contains(dualClass, "985") || strings.Contains(dualClass, "211") || strings.Contains(dualClass, "双一流") {
+		return dualClass
+	}
+	if strings.Contains(school, "职业") && strings.Contains(school, "技术大学") {
+		return "职业本科"
+	}
+	knownPrivate := []string{"文达信息工程", "新华学院", "三联学院", "安徽信息工程", "皖江工学院", "外国语学院", "商学院", "金融学院", "科技学院", "理工学院", "江淮学院", "滨江学院", "皖南医学院"}
+	for _, kw := range knownPrivate {
+		if strings.Contains(school, kw) {
+			return "民办本科"
+		}
+	}
+	if strings.Contains(level, "一本") {
+		return "公办一本"
+	}
+	if strings.Contains(level, "二本") {
+		return "公办二本"
+	}
+	if strings.Contains(t, "民办") || strings.Contains(t, "独立学院") {
+		return "民办本科"
+	}
+	if strings.Contains(t, "职业") {
+		return "职业本科"
+	}
+	if strings.Contains(t, "专科") || strings.Contains(t, "高职") {
+		return "专科"
+	}
+	return "公办本科"
 }
 
 func estimateGaokaoEngineeringStrength(rec GaokaoRecommendation) string {
@@ -235,18 +266,18 @@ func seedGaokaoStrongMajorReportItems(profile GaokaoProfile) []GaokaoProfessiona
 		rank                                  int
 	}
 	seeds := []seed{
-		{"桂林电子科技大学", "桂林", "自动化、电子信息工程、集成电路", "电子强校", "★★★★★", 38000},
-		{"天津理工大学", "天津", "自动化、电子信息工程", "省重点", "★★★★☆", 41000},
-		{"长春理工大学", "长春", "电子信息工程、自动化、光电信息", "光电特色", "★★★★★", 42000},
-		{"江苏科技大学", "镇江", "自动化、车辆工程", "省重点", "★★★★☆", 43000},
-		{"西安工业大学", "西安", "自动化、电子信息工程", "军工特色", "★★★★☆", 44000},
-		{"武汉工程大学", "武汉", "自动化、电子信息", "省重点", "★★★★☆", 45000},
-		{"沈阳工业大学", "沈阳", "自动化、电气工程", "电气强校", "★★★★★", 47000},
-		{"安徽工业大学", "马鞍山", "自动化、车辆工程", "省重点", "★★★★☆", 48000},
-		{"华东交通大学", "南昌", "自动化、车辆工程", "交通特色", "★★★★", 50000},
-		{"南昌航空大学", "南昌", "自动化、电子信息工程", "航空特色", "★★★★☆", 51000},
-		{"安徽理工大学", "淮南", "自动化、车辆工程", "省重点", "★★★★", 53000},
-		{"山东理工大学", "淄博", "自动化、车辆工程", "省重点", "★★★★", 55000},
+		{"桂林电子科技大学", "桂林", "自动化、电子信息工程、集成电路", "公办本科", "★★★★★", 38000},
+		{"天津理工大学", "天津", "自动化、电子信息工程", "公办本科", "★★★★☆", 41000},
+		{"长春理工大学", "长春", "电子信息工程、自动化、光电信息", "公办本科", "★★★★★", 42000},
+		{"江苏科技大学", "镇江", "自动化、车辆工程", "公办本科", "★★★★☆", 43000},
+		{"西安工业大学", "西安", "自动化、电子信息工程", "公办本科", "★★★★☆", 44000},
+		{"武汉工程大学", "武汉", "自动化、电子信息", "公办本科", "★★★★☆", 45000},
+		{"沈阳工业大学", "沈阳", "自动化、电气工程", "公办本科", "★★★★★", 47000},
+		{"安徽工业大学", "马鞍山", "自动化、车辆工程", "公办本科", "★★★★☆", 48000},
+		{"华东交通大学", "南昌", "自动化、车辆工程", "公办本科", "★★★★", 50000},
+		{"南昌航空大学", "南昌", "自动化、电子信息工程", "公办本科", "★★★★☆", 51000},
+		{"安徽理工大学", "淮南", "自动化、车辆工程", "公办本科", "★★★★", 53000},
+		{"山东理工大学", "淄博", "自动化、车辆工程", "公办本科", "★★★★", 55000},
 	}
 	out := []GaokaoProfessionalReportItem{}
 	for _, s := range seeds {
@@ -272,6 +303,9 @@ func bandFromGaokaoChance(chance string) string {
 }
 
 func skipGaokaoProfessionalReportRec(profile GaokaoProfile, rec GaokaoRecommendation) bool {
+	if strings.Contains(rec.Type, "待复核") || strings.Contains(rec.Level, "联网待复核") {
+		return true
+	}
 	text := rec.School + " " + rec.Major + " " + strings.Join(rec.RecommendedMajorPool, "、")
 	for _, kw := range []string{"军", "警察", "公安", "消防", "司法", "师范", "工商", "财经", "外语", "政法"} {
 		if strings.Contains(rec.School, kw) {

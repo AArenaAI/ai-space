@@ -10,6 +10,7 @@ import {
   BarChart3, Mail, ClipboardList, Terminal, GraduationCap, Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api/client";
 
 interface GoSkillMeta {
   key: string;
@@ -170,7 +171,7 @@ export default function SkillsPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("/api/skills")
+    apiFetch("/skills")
       .then((r) => r.json())
       .then((data) => {
         const systemSkills: GoSkillMeta[] = data.system_skills || [];

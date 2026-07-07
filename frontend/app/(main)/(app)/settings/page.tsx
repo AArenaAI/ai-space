@@ -482,9 +482,8 @@ function BetaApplySection({ onCodeClick }: { onCodeClick: () => void }) {
     }
     setSubmitting(true);
     try {
-      const res = await fetch("/api/beta/apply", {
+      const res = await apiFetch("/beta/apply", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
       const data = await res.json().catch(() => ({}));

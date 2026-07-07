@@ -166,9 +166,9 @@ async function openLatestActivityPanel(page) {
   if (missingStableLayer.length > 0) {
     issues.push(`answer stable layer should stay mounted through completion settling: ${JSON.stringify(missingStableLayer)}`);
   }
-  const duplicateAnswer = finalRenderSnapshots.find((snapshot) => (snapshot.answerText.match(/B001/g) || []).length !== 1 || (snapshot.answerText.match(/B120/g) || []).length !== 1);
+  const duplicateAnswer = completionSettleSnapshots.find((snapshot) => (snapshot.answerText.match(/B001/g) || []).length !== 1 || (snapshot.answerText.match(/B120/g) || []).length !== 1);
   if (duplicateAnswer) {
-    issues.push(`answer text should appear exactly once through completion and hydration: ${JSON.stringify(duplicateAnswer)}`);
+    issues.push(`answer text should appear exactly once through completion settling and hydration: ${JSON.stringify(duplicateAnswer)}`);
   }
   const maxHeight = Math.max(...completionSettleSnapshots.map((snapshot) => snapshot.rowHeight));
   const minHeight = Math.min(...completionSettleSnapshots.map((snapshot) => snapshot.rowHeight).filter(Boolean));

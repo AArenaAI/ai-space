@@ -1,3 +1,5 @@
+import { apiFetch } from "@/lib/api/client";
+
 export interface RefreshedVideoGeneration {
   id: number;
   prompt: string;
@@ -74,8 +76,7 @@ export async function refreshVideoTaskThrottled(
     const waitMs = Math.max(0, nextGlobalRefreshAt - queuedNow, lastSameVideoAt + MIN_SAME_VIDEO_REFRESH_GAP_MS - queuedNow);
     if (waitMs > 0) await sleep(waitMs);
 
-    const res = await fetch(`/api/videos/${id}/refresh`, {
-      credentials: "include",
+    const res = await apiFetch(`/videos/${id}/refresh`, {
       headers,
     });
 

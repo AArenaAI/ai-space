@@ -348,7 +348,6 @@ export function realtimeMarkCompleted(id: string, completedAt = now()) {
 export function realtimeClear(id: string) {
   const hadEntry = store.has(id);
   store.delete(id);
-  subs.delete(id);
   pending.delete(id);
   if (pending.size === 0 && frame !== null) {
     cancelAnimationFrame(frame);
@@ -358,6 +357,10 @@ export function realtimeClear(id: string) {
     clearTimeout(cleanupTimer);
     cleanupTimer = null;
   }
+  // Keep existing subscribers. React useSyncExternalStore listeners are long-lived;
+  // deleting the listener set here silently orphans mounted message rows, so later
+  // realtimeUpdate/realtimeAppend calls no longer wake them up. That makes the
+  // main answer path lag behind Activity even though both read the same store.
   if (hadEntry) schedule(id);
 }
 

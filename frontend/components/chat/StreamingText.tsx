@@ -1,25 +1,17 @@
 "use client";
 
-import { ChevronDown, Lightbulb } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { useMessageStream } from "@/hooks/useMessageStream";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import StreamingMarkdownView from "./StreamingMarkdownView";
 import { formatElapsedTime } from "@/lib/chatGenerationPhase";
+import AssistantPendingShell from "./AssistantPendingShell";
+import AssistantGenerationFrame, { type AssistantGenerationPhase } from "./AssistantGenerationFrame";
 
 function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
-}
-
-function ThinkingDots() {
-  return (
-    <span className="inline-flex h-4 items-center gap-1 text-text-tertiary/70" aria-label="正在准备回复">
-      <span className="chat-thinking-dot h-[5px] w-[5px] rounded-full bg-current opacity-70" style={{ animationDelay: "0ms" }} />
-      <span className="chat-thinking-dot h-[5px] w-[5px] rounded-full bg-current opacity-70" style={{ animationDelay: "180ms" }} />
-      <span className="chat-thinking-dot h-[5px] w-[5px] rounded-full bg-current opacity-70" style={{ animationDelay: "360ms" }} />
-    </span>
-  );
 }
 
 function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
@@ -68,6 +60,7 @@ export function StreamingText({
   className,
   as = "div",
   onOpenActivity,
+  runtimePhase,
 }: {
   messageId: string;
   content: string;
@@ -77,6 +70,7 @@ export function StreamingText({
   className?: string;
   as?: "div" | "span";
   onOpenActivity?: () => void;
+  runtimePhase?: AssistantGenerationPhase;
 }) {
   const { t } = useI18n();
   const realtime = useMessageRealtime(messageId);
@@ -116,58 +110,74 @@ export function StreamingText({
   const parsed = hasThinkTag || hasSplitRealtime
     ? { ...fullParsed, reasoning: fullParsed.reasoning === null ? null : displayedReasoning, answer: displayedAnswer }
     : parseThinkContent(displayedText);
+  const rawHasReason = !!(realtime?.reasoningContent?.trim() || fullParsed.reasoning?.trim());
+  const rawHasContent = !!(realtime?.answerContent?.trim() || fullParsed.answer.trim());
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
   const Host = as;
   const elapsedLabel = hasReason ? formatElapsedTime(generationElapsedMs(realtime), t) : "";
-  const showInitialReasoningStatus = isStreaming && !hasContent && !hasReason;
+  const showInitialReasoningStatus = isStreaming && !rawHasContent && !rawHasReason;
   const reasoningLabel = isStreaming && parsed.isThinking ? "思考中" : "已思考";
+  const localGenerationPhase: AssistantGenerationPhase = showInitialReasoningStatus
+    ? "pending"
+    : (rawHasContent || realtime?.phase === "streaming_answer" || realtime?.phase === "generating") && isStreaming
+      ? "answering"
+      : (rawHasReason || realtime?.isReasoning || realtime?.phase === "reasoning" || realtime?.phase === "thinking") && isStreaming
+        ? "reasoning"
+        : rawHasContent || rawHasReason || hasContent || hasReason
+          ? "completed"
+          : "empty";
+  const generationPhase: AssistantGenerationPhase = runtimePhase && runtimePhase !== "pending"
+    ? runtimePhase
+    : localGenerationPhase;
 
   return (
     <Host className={className}>
-      {hasReason && (
-        <div className="mb-2" data-chat-stream-reasoning-slot="true">
-          <button
-            type="button"
-            aria-expanded={false}
-            onClick={() => onOpenActivity?.()}
-            className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
-          >
-            <span className="text-xs font-medium">{reasoningLabel}{elapsedLabel ? ` · ${elapsedLabel}` : ""}</span>
-            <ChevronDown
-              className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
-            />
-          </button>
+      <AssistantGenerationFrame phase={generationPhase}>
+        {hasReason && (
+          <div className="mb-2" data-chat-stream-reasoning-slot="true">
+            <button
+              type="button"
+              aria-expanded={false}
+              onClick={() => onOpenActivity?.()}
+              className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+            >
+              <span className="text-xs font-medium">{reasoningLabel}{elapsedLabel ? ` · ${elapsedLabel}` : ""}</span>
+              <ChevronDown
+                className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
+              />
+            </button>
 
-        </div>
-      )}
-      {hasContent && (
-        <span
-          data-i18n-skip="true"
-          data-chat-answer-stable-layer="true"
-          data-chat-stream-content-slot="true"
-          data-chat-answer-content-source={answerContentSource}
-          data-chat-answer-canonical-match={preferCanonicalContent ? String(realtimeMatchesCanonical) : undefined}
-          className="streaming-answer-markdown block break-words"
-        >
-          <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange={!preferCanonicalContent} isStreaming={stableMarkdownStreamingMode} />
-        </span>
-      )}
-      {showInitialReasoningStatus && (
-        <div className="mb-2 flex min-h-[4.25rem] items-start" data-chat-initial-reasoning-status="true" data-chat-stream-reasoning-slot="true">
-          <button
-            type="button"
-            aria-expanded={false}
-            onClick={() => onOpenActivity?.()}
-            className="inline-flex max-w-full items-center rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+          </div>
+        )}
+        {hasContent && (
+          <span
+            data-i18n-skip="true"
+            data-chat-answer-stable-layer="true"
+            data-chat-stream-content-slot="true"
+            data-chat-answer-content-source={answerContentSource}
+            data-chat-answer-canonical-match={preferCanonicalContent ? String(realtimeMatchesCanonical) : undefined}
+            className="streaming-answer-markdown block break-words"
           >
-            <ThinkingDots />
-          </button>
-        </div>
-      )}
-      {!hasContent && !hasReason && !showInitialReasoningStatus && (
-        <span className="block h-0 overflow-hidden" data-chat-empty-streaming-placeholder="true" aria-hidden="true" />
-      )}
+            <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange={!preferCanonicalContent} isStreaming={stableMarkdownStreamingMode} />
+          </span>
+        )}
+        {showInitialReasoningStatus && (
+          <div className="mb-2 flex items-start" data-chat-initial-reasoning-status="true" data-chat-stream-reasoning-slot="true">
+            <button
+              type="button"
+              aria-expanded={false}
+              onClick={() => onOpenActivity?.()}
+              className="inline-flex max-w-full items-center rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+            >
+              <AssistantPendingShell compact />
+            </button>
+          </div>
+        )}
+        {!hasContent && !hasReason && !showInitialReasoningStatus && (
+          <span className="block h-0 overflow-hidden" data-chat-empty-streaming-placeholder="true" aria-hidden="true" />
+        )}
+      </AssistantGenerationFrame>
       {isStreaming && (hasContent || hasReason) && <StreamingCursor />}
     </Host>
   );

@@ -28,6 +28,7 @@ import { createPortal } from "react-dom";
 import { useTheme } from "@/components/theme/ThemeProvider";
 import { useAppBootstrap } from "@/lib/appBootstrapContext";
 import { clearChatSidebarHistoryCache, useChatSidebarHistory, type SidebarConversation } from "@/hooks/useChatSidebarHistory";
+import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { apiFetch, apiJson } from "@/lib/api/client";
 import { logoutBrowserSession } from "@/lib/auth/state";
 
@@ -154,6 +155,7 @@ export default function MobileNav() {
   const routeConvId = searchParams?.get("id") || null;
   const effectiveRouteConvId = routeConvId || (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("id") : null);
   const router = useRouter();
+  const { currentWS } = useWorkspaces();
   const drawerRef = useRef<HTMLDivElement>(null);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   const chatBootstrapReadyRef = useRef(false);
@@ -237,10 +239,11 @@ export default function MobileNav() {
     loadingMoreConversations,
   } = useChatSidebarHistory({
     user,
+    workspaceId: currentWS?.id,
     pathname,
     routeConversationId: effectiveRouteConvId,
     chatBootstrap,
-    cacheKey: "mobile",
+    cacheKey: `mobile:${currentWS?.id || "all"}`,
     captureAnchor: captureHistoryAnchor,
     restoreAnchor: restoreHistoryAnchor,
     firstLoadMinMs: 600,
@@ -249,7 +252,21 @@ export default function MobileNav() {
   useEffect(() => { document.body.style.overflow = menuOpen ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menuOpen]);
   useEffect(() => { if (!menuOpen) return; const h = (e: MouseEvent) => { if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) setMenuOpen(false); }; document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h); }, [menuOpen]);
 
-  const handleLogout = async () => { await logoutBrowserSession(); setUser(null); setConversations([]); clearChatSidebarHistoryCache("mobile"); setMenuOpen(false); router.push("/"); };
+  useEffect(() => {
+    const resetHistory = () => {
+      clearChatSidebarHistoryCache(`mobile:${currentWS?.id || "all"}`);
+    };
+    window.addEventListener("workspace-changed", resetHistory);
+    window.addEventListener("user-login", resetHistory);
+    window.addEventListener("user-logout", resetHistory);
+    return () => {
+      window.removeEventListener("workspace-changed", resetHistory);
+      window.removeEventListener("user-login", resetHistory);
+      window.removeEventListener("user-logout", resetHistory);
+    };
+  }, [currentWS?.id]);
+
+  const handleLogout = async () => { await logoutBrowserSession(); setUser(null); setConversations([]); clearChatSidebarHistoryCache(`mobile:${currentWS?.id || "all"}`); setMenuOpen(false); router.push("/"); };
   const handleNewChat = () => { router.push(`/chat?t=${Date.now()}`); setMenuOpen(false); };
   const handleOpenConversation = useCallback((conv: Conversation) => {
     setCurrentConvId(String(conv.id));

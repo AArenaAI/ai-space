@@ -37,6 +37,7 @@ type GaokaoAdvisorResponse struct {
 	ExternalCandidatePlan GaokaoExternalCandidatePlan      `json:"external_candidate_plan"`
 	AdvisorPlanSections   []GaokaoAdvisorPlanSection       `json:"advisor_plan_sections"`
 	ProfessionalReport    GaokaoProfessionalReport         `json:"professional_report"`
+	FinalReportMarkdown   string                           `json:"final_report_markdown"`
 	ModelReports          []GaokaoAdvisorModelReport       `json:"model_reports"`
 	ModelStatus           string                           `json:"model_status"`
 	ModelNote             string                           `json:"model_note"`

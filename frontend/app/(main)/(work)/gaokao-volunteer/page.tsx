@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   AlertTriangle,
   ArrowRight,
@@ -14,12 +16,14 @@ import {
   History,
   MapPin,
   MessageSquare,
+  MoreHorizontal,
   RefreshCw,
   Send,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Target,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -148,6 +152,14 @@ type RiskIssue = {
   level: "high" | "medium" | "low";
   title: string;
   detail: string;
+};
+
+type ReportHistoryItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  createdAtLabel: string;
+  result: any;
 };
 
 const defaultProfile: StudentProfile = {
@@ -423,10 +435,13 @@ function StatCard({ label, value, hint, icon: Icon }: { label: string; value: st
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-text-tertiary">{label}</span>
+      <span className="mb-1.5 flex items-center gap-1 text-xs font-medium text-text-tertiary">
+        <span>{label}</span>
+        <span className={cn("rounded-full px-1.5 py-0.5 text-[10px]", required ? "bg-neutral-950 text-white dark:bg-white dark:text-neutral-950" : "bg-neutral-100 text-text-tertiary dark:bg-surface-elevated")}>{required ? "必填" : "可选"}</span>
+      </span>
       {children}
     </label>
   );
@@ -535,6 +550,15 @@ export default function GaokaoVolunteerPage() {
   const [profile, setProfile] = useState<StudentProfile>(defaultProfile);
   const [selectedBand, setSelectedBand] = useState<RiskBand | "全部">("全部");
   const [activeTrack, setActiveTrack] = useState<"本科" | "专科" | null>(null);
+  const [guideMode, setGuideMode] = useState<"city" | "major" | "comprehensive" | null>(null);
+  const [guideAnswers, setGuideAnswers] = useState<Record<string, string[]>>({});
+  const [guideSubmitted, setGuideSubmitted] = useState(false);
+  const [guideLoading, setGuideLoading] = useState(false);
+  const [guideProgress, setGuideProgress] = useState(0);
+  const [guideResult, setGuideResult] = useState("");
+  const [guideData, setGuideData] = useState<any>(null);
+  const [guideHistoryOpen, setGuideHistoryOpen] = useState(false);
+  const [guideHistory, setGuideHistory] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [agentOpen, setAgentOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -551,10 +575,14 @@ export default function GaokaoVolunteerPage() {
   const [savingPlan, setSavingPlan] = useState(false);
   const [coverageSummary, setCoverageSummary] = useState<any>(null);
   const [advisorResult, setAdvisorResult] = useState<any>(null);
+  const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
+  const [openReportMenuId, setOpenReportMenuId] = useState<string | null>(null);
   const [advisorEvents, setAdvisorEvents] = useState<Array<{ type: string; text: string }>>([]);
   const [activeDocument, setActiveDocument] = useState<"report" | "sources" | "candidates">("report");
   const [reportPreviewOpen, setReportPreviewOpen] = useState(false);
   const [advisorLoading, setAdvisorLoading] = useState(false);
+  const [reportProgress, setReportProgress] = useState(0);
+  const [reportStage, setReportStage] = useState("等待生成");
   const [openPicker, setOpenPicker] = useState<"preferredCities" | "preferredMajors" | "rejectedMajors" | null>(null);
   const [volunteerTable, setVolunteerTable] = useState<VolunteerTable | null>(null);
   const [volunteerTableLoading, setVolunteerTableLoading] = useState(false);
@@ -563,6 +591,7 @@ export default function GaokaoVolunteerPage() {
   const [riskStats, setRiskStats] = useState<Record<string, number> | null>(null);
   const [riskLoading, setRiskLoading] = useState(false);
   const orbDragRef = useRef<{ dragging: boolean; moved: boolean; offsetX: number; offsetY: number; startX: number; startY: number }>({ dragging: false, moved: false, offsetX: 0, offsetY: 0, startX: 0, startY: 0 });
+  const reportArticleRef = useRef<HTMLDivElement | null>(null);
   const [orbPosition, setOrbPosition] = useState({ x: 0, y: 0 });
 
   const currentVolunteerRule = useMemo(() => volunteerRuleForProvince(profile.province), [profile.province]);
@@ -574,6 +603,56 @@ export default function GaokaoVolunteerPage() {
       return acc;
     }, { 冲: 0, 稳: 0, 保: 0, 垫: 0 });
   }, [recommendations]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("gaokao-guide-history");
+      if (raw) setGuideHistory(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!guideLoading) return;
+    setGuideProgress(8);
+    const timer = window.setInterval(() => {
+      setGuideProgress((prev) => Math.min(92, prev + (prev < 35 ? 7 : prev < 70 ? 5 : 2)));
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [guideLoading]);
+
+  const saveGuideHistory = (record: any) => {
+    const next = [record, ...guideHistory].slice(0, 30);
+    setGuideHistory(next);
+    try { localStorage.setItem("gaokao-guide-history", JSON.stringify(next)); } catch {}
+  };
+
+  const cleanGuideText = (value: unknown) => String(value ?? "")
+    .replace(/\(\[[^\]]+\]\([^\)]+\)\)/g, "")
+    .replace(/\[[^\]]+\]\([^\)]+\)/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/utm_source=openai/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const guideRecordToMarkdown = (record: any) => {
+    if (typeof record.data === "string") return cleanGuideText(record.data);
+    const d = record.data || {};
+    const rows = (d.table_rows || []).map((row: any) => `| ${cleanGuideText(row.name)} | ${row.score ?? ""} | ${(row.cells || []).map((cell: string) => cleanGuideText(cell)).join(" | ")} |`).join("\n");
+    const header = `| 项目 | 分数 | ${(d.table_columns || []).join(" | ")} |`;
+    const sep = `|---|---|${(d.table_columns || []).map(() => "---").join("|")}|`;
+    return `# ${cleanGuideText(d.title || record.title)}\n\n${cleanGuideText(d.summary || "")}\n\n## 推荐表格\n\n${header}\n${sep}\n${rows}\n\n## 匹配度\n${(d.bar_chart?.items || []).map((i: any) => `- ${i.label}: ${i.value}`).join("\n")}\n\n## 因素权重\n${(d.pie_chart?.items || []).map((i: any) => `- ${i.label}: ${i.value}%`).join("\n")}\n\n## 趋势\n${(d.trend_chart?.items || []).map((i: any) => `- ${i.label}: ${i.value}`).join("\n")}\n\n## 下一步\n${(d.next_steps || []).map((s: string) => `- ${s}`).join("\n")}`;
+  };
+
+  const downloadGuideRecord = (record: any) => {
+    const content = guideRecordToMarkdown(record);
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${record.title || "高考推荐文档"}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     if (!activeTrack || recommendRefreshKey === 0) return;
@@ -803,11 +882,27 @@ export default function GaokaoVolunteerPage() {
   const runAdvisor = async (profileOverride?: StudentProfile, messageOverride?: string, trackOverride?: "本科" | "专科" | null) => {
     const activeProfile = profileOverride ?? profile;
     const requestTrack = trackOverride ?? activeTrack;
+    const missingRequired = [
+      !activeProfile.province && "省份",
+      !activeProfile.score && "分数",
+      !activeProfile.rank && "全省位次",
+      !activeProfile.subjects && "选科 / 科类",
+    ].filter(Boolean) as string[];
+    if (missingRequired.length > 0) {
+      toast.error(`请先填写必填项：${missingRequired.join("、")}`);
+      return;
+    }
     const activeMessage = messageOverride?.trim() || chatInput.trim() || `我想要${activeProfile.province}${activeProfile.subjects}，位次${activeProfile.rank}，偏好${activeProfile.preferredMajors || requestTrack || "本科"}，请给${requestTrack || "最合理"}方案`;
     setAdvisorLoading(true);
     setAdvisorResult(null);
     setAdvisorEvents([]);
+    setReportProgress(8);
+    setReportStage("整理需求");
     setActiveDocument("report");
+    const updateReportProgress = (stage: string, progress: number) => {
+      setReportStage(stage);
+      setReportProgress((prev) => Math.max(prev, progress));
+    };
     const pushEvent = (type: string, text: string) => setAdvisorEvents((prev) => [...prev.slice(-12), { type, text }]);
     try {
       const response = await fetch("/api/gaokao/advisor/stream", {
@@ -838,23 +933,74 @@ export default function GaokaoVolunteerPage() {
           const raw = dataLine?.replace("data:", "").trim() || "{}";
           let data: any = {};
           try { data = JSON.parse(raw); } catch {}
-          if (type === "intent") pushEvent(type, `理解档案：${data.province}${data.subjects} 位次 ${data.rank}`);
-          if (type === "local_recommendations") pushEvent(type, `本地候选 ${data.count || 0} 个${data.needs_web_lookup ? "，需要联网补查" : ""}`);
-          if (type === "model_started") pushEvent(type, `模型分析启动：${data.provider}`);
-          if (type === "model_analysis") pushEvent(type, `模型分析完成：${data.status}`);
-          if (type === "model_report") pushEvent(type, `${data.provider || "model"} ${data.role || ""} 完成：${data.status}`);
-          if (type === "model_committee") pushEvent(type, `多模型综合完成：${data.status}`);
-          if (type === "model_error") pushEvent(type, `${data.provider || "model"} ${data.role || ""} 回退：${data.message || data.status}`);
-          if (type === "search_started") pushEvent(type, `开始联网补查：${data.queries?.length || 0} 个查询`);
-          if (type === "source_hits") pushEvent(type, `来源命中：${data.count || 0}`);
-          if (type === "evidence_links") pushEvent(type, `可跳转来源链接：${data.count || 0}`);
-          if (type === "external_candidates") pushEvent(type, `联网候选抽取：${data.count || 0}`);
-          if (type === "external_candidate_plan") pushEvent(type, `待复核方案：保留 ${data.usable_count || 0}，过滤 ${data.rejected_count || 0}`);
+          if (type === "intent") {
+            updateReportProgress("整理需求", 16);
+            pushEvent(type, `理解档案：${data.province}${data.subjects} 位次 ${data.rank}`);
+          }
+          if (type === "local_recommendations") {
+            updateReportProgress("整理需求", 28);
+            pushEvent(type, `本地候选 ${data.count || 0} 个${data.needs_web_lookup ? "，需要联网补查" : ""}`);
+          }
+          if (type === "search_started") {
+            updateReportProgress("整理需求", 36);
+            pushEvent(type, `开始联网补查：${data.queries?.length || 0} 个查询`);
+          }
+          if (type === "source_hits") {
+            updateReportProgress("整理需求", 42);
+            pushEvent(type, `来源命中：${data.count || 0}`);
+          }
+          if (type === "evidence_links") {
+            updateReportProgress("整理需求", 48);
+            pushEvent(type, `可跳转来源链接：${data.count || 0}`);
+          }
+          if (type === "external_candidates") {
+            updateReportProgress("生成初稿", 56);
+            pushEvent(type, `联网候选抽取：${data.count || 0}`);
+          }
+          if (type === "external_candidate_plan") {
+            updateReportProgress("生成初稿", 64);
+            pushEvent(type, `待复核方案：保留 ${data.usable_count || 0}，过滤 ${data.rejected_count || 0}`);
+          }
+          if (type === "model_started") {
+            updateReportProgress(data.role === "ranking_risk" ? "复核报告" : "生成初稿", data.role === "ranking_risk" ? 72 : 68);
+            pushEvent(type, `模型分析启动：${data.provider}`);
+          }
+          if (type === "model_analysis") {
+            updateReportProgress("复核报告", 78);
+            pushEvent(type, `模型分析完成：${data.status}`);
+          }
+          if (type === "model_report") {
+            updateReportProgress(data.role === "ranking_risk" ? "复核报告" : "生成终稿", data.role === "ranking_risk" ? 82 : 88);
+            pushEvent(type, `${data.provider || "model"} ${data.role || ""} 完成：${data.status}`);
+          }
+          if (type === "model_committee") {
+            updateReportProgress("生成终稿", 92);
+            pushEvent(type, `多模型综合完成：${data.status}`);
+          }
+          if (type === "model_error") {
+            updateReportProgress("复核报告", 82);
+            pushEvent(type, `${data.provider || "model"} ${data.role || ""} 回退：${data.message || data.status}`);
+          }
           if (type === "advisor_plan_sections") pushEvent(type, `产品方案卡片：${data.count || 0}`);
-          if (type === "professional_report") pushEvent(type, "专业志愿报告已生成");
-          if (type === "plan_ready") pushEvent(type, "方案生成完成");
+          if (type === "professional_report") {
+            updateReportProgress("生成终稿", 96);
+            pushEvent(type, "专业志愿报告已生成");
+          }
+          if (type === "plan_ready") {
+            updateReportProgress("生成终稿", 98);
+            pushEvent(type, "方案生成完成");
+          }
           if (type === "done") {
             setAdvisorResult(data);
+            const item: ReportHistoryItem = {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              title: `${requestTrack || activeTrack || "本科"}专项志愿规划报告`,
+              subtitle: "报告 · 院校 · 来源",
+              createdAtLabel: "刚刚",
+              result: data,
+            };
+            setReportHistory((prev) => [item, ...prev].slice(0, 20));
+            updateReportProgress("生成完成", 100);
             pushEvent(type, "Advisor 已完成");
           }
         }
@@ -1011,7 +1157,30 @@ export default function GaokaoVolunteerPage() {
     setMessages([{ role: "assistant", content: "已恢复默认样例档案。你可以继续修改位次、城市、专业和风险策略。" }]);
   };
 
+  const downloadAdvisorReport = (result: any) => {
+    const markdown = String(result?.final_report_markdown || "").trim();
+    const content = markdown || `# ${activeTrack || "高考"}专项志愿规划报告\n\n暂无可下载的报告正文。`;
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `gaokao-advisor-report-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("报告已下载");
+  };
+
+  const deleteReportHistoryItem = (id: string) => {
+    setReportHistory((prev) => prev.filter((item) => item.id !== id));
+    setOpenReportMenuId(null);
+    toast.success("已删除历史记录");
+  };
+
   const exportReport = () => {
+    if (advisorResult?.final_report_markdown) {
+      downloadAdvisorReport(advisorResult);
+      return;
+    }
     const lines = [
       "# AI Space 高考志愿方案",
       "",
@@ -1038,6 +1207,187 @@ export default function GaokaoVolunteerPage() {
     toast.success("志愿报告已导出");
   };
 
+  useEffect(() => {
+    const root = reportArticleRef.current;
+    if (!root || !advisorResult?.final_report_markdown) return;
+    const timer = window.setTimeout(() => {
+      root.querySelectorAll("table").forEach((table) => {
+        const headerCells = Array.from(table.querySelectorAll("thead th"));
+        const headers = headerCells.map((cell) => (cell.textContent || "").trim());
+        const schoolIndex = headers.findIndex((h) => h.includes("学校"));
+        const cityIndex = headers.findIndex((h) => h.includes("城市"));
+        const levelIndex = headers.findIndex((h) => h.includes("层次"));
+        const majorIndex = headers.findIndex((h) => h.includes("推荐专业"));
+        if (schoolIndex < 0 || majorIndex < 0) return;
+        [cityIndex, levelIndex].filter((idx) => idx >= 0).forEach((idx) => {
+          (headerCells[idx] as HTMLElement).style.display = "none";
+        });
+        table.querySelectorAll("tbody tr").forEach((row) => {
+          const cells = Array.from(row.children) as HTMLElement[];
+          const city = cityIndex >= 0 ? (cells[cityIndex]?.textContent || "").trim() : "";
+          const level = levelIndex >= 0 ? (cells[levelIndex]?.textContent || "").trim() : "";
+          [cityIndex, levelIndex].filter((idx) => idx >= 0).forEach((idx) => {
+            if (cells[idx]) cells[idx].style.display = "none";
+          });
+          if (cells[schoolIndex]) {
+            cells[schoolIndex].title = [city && `城市：${city}`, level && `层次：${level}`].filter(Boolean).join("\n");
+            cells[schoolIndex].classList.add("cursor-help", "font-medium", "text-text-primary", "decoration-dotted", "underline-offset-4", "hover:underline");
+          }
+          const majorCell = cells[majorIndex];
+          if (majorCell && !majorCell.dataset.tooltipReady) {
+            majorCell.dataset.tooltipReady = "true";
+            const majors = (majorCell.textContent || "").split(/[、，,；;]/).map((item) => item.trim()).filter(Boolean);
+            if (majors.length > 0) {
+              majorCell.textContent = "";
+              majors.forEach((rawMajor) => {
+                const match = rawMajor.match(/^(.*?)[（(\[]?专业最低位次[:：]\s*(\d{4,6})[）)\]]?$/);
+                const major = (match?.[1] || rawMajor).trim();
+                const majorRank = match?.[2] || "";
+                const chip = document.createElement("span");
+                chip.textContent = major;
+                chip.title = majorRank ? `${major}\n去年该专业录取最低位次：${majorRank}` : `${major}\n去年该专业录取最低位次：待核验`;
+                chip.className = "mr-1.5 mb-1 inline-flex cursor-help rounded-full border border-surface-border bg-surface-elevated/70 px-2 py-0.5 text-[11px] text-text-secondary hover:border-neutral-400 hover:text-text-primary";
+                majorCell.appendChild(chip);
+              });
+            }
+          }
+        });
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [advisorResult?.final_report_markdown, reportPreviewOpen]);
+
+  const guideConfig = {
+    city: {
+      title: "城市推荐",
+      desc: "从专业方向、就业行业、生活偏好推导适合城市。",
+      resultTitle: "城市建议",
+      questions: ["你更想去一线/新一线/省会/离家近？", "偏好的就业行业是什么？", "是否看重金融/互联网/制造业/新能源？", "能否接受北方/南方气候？", "是否希望实习机会多？", "是否看重落户和长期发展？", "家庭能接受的生活成本？", "是否更喜欢大城市资源？", "是否想留在本省？", "是否重视考研资源？", "是否考虑国企/央企机会？", "是否看重城市安全感和通勤？", "是否看重医疗、教育、公共服务便利度？", "是否接受远离家乡但产业更强的城市？", "毕业后更想留在学校所在城市还是回本省？", "是否偏好沿海/内陆/省会/产业园区城市？", "是否担心城市竞争压力和生活节奏？", "是否希望城市有明确的专业产业集群？", "补充说明：还有哪些城市、家庭或就业偏好需要说明？"],
+      defaults: ["上海：金融、航运、外企、长三角资源强", "深圳/广州：电子信息、互联网、先进制造、外贸强", "杭州：互联网、数字经济、智能制造强", "南京/苏州：电子、制造、软件、长三角就业稳", "成都/重庆：电子信息、汽车、软件和生活成本平衡"],
+    },
+    major: {
+      title: "专业推荐",
+      desc: "从兴趣、能力、就业目标推导适合专业方向。",
+      resultTitle: "专业建议",
+      questions: ["最喜欢的高中学科是什么？", "数学/物理基础强不强？", "是否能接受编程？", "是否喜欢硬件、电路、机械、自动化？", "是否希望就业面宽？", "是否接受读研提升？", "是否排斥医学/土木/化工/师范？", "更看重收入还是稳定？", "是否喜欢和人打交道？", "是否接受工厂/实验室/外勤场景？", "是否考虑考公/国企？", "是否看重专业转码空间？", "是否喜欢写作、表达、材料整理？", "是否喜欢计算、建模、数据分析？", "是否喜欢设计、创意、内容传播？", "是否能接受长期考证或资格考试？", "是否希望本科毕业就有较强就业确定性？", "是否愿意为了专业前景接受较高学习难度？", "补充说明：还有哪些兴趣、能力或职业目标需要说明？"],
+      defaults: ["电子信息工程：就业面宽，适合硬件/通信/嵌入式", "自动化：控制、智能制造、机器人方向稳", "计算机/软件：收入弹性高，但竞争强", "电气工程：电网/新能源/装备制造方向稳定", "集成电路/微电子：适合读研和半导体产业链"],
+    },
+    comprehensive: {
+      title: "综合推荐",
+      desc: "把城市、专业、学校层次、家庭预算和风险偏好合并判断。",
+      resultTitle: "综合建议",
+      questions: ["当前最重要的是城市、专业还是学校层次？", "目标是冲好学校还是保好专业？", "能否接受调剂？", "是否接受民办/中外合作/高收费？", "学费上限是多少？", "是否必须公办？", "是否优先省内？", "是否考虑专科兜底？", "是否未来考研？", "是否偏好稳定就业？", "是否可接受冷门专业换学校层次？", "是否可接受低一档城市换专业质量？", "家庭对风险的接受度？", "最不能接受的专业/城市/学校类型？", "是否愿意用城市层级换更好的专业？", "是否愿意用专业热度换更高学校层次？", "是否必须保证不滑档？", "是否需要兼顾父母意见和家庭资源？", "是否接受跨省就业和长期外地发展？", "是否希望方案偏冲刺、均衡还是保守？", "补充说明：还有哪些综合取舍或家庭意见需要说明？"],
+      defaults: ["专业优先：选专业强、位次匹配、就业方向清晰的学校", "城市优先：优先长三角/珠三角/成渝等产业城市", "学校优先：适当冲高层次，但保留稳妥专业", "稳妥优先：主力放在接近位次学校，少量冲刺，充分保底", "预算优先：优先公办和低收费专业，谨慎中外合作/民办"],
+    },
+  } as const;
+  const activeGuide = guideMode ? guideConfig[guideMode] : null;
+  const guideRecommendation = activeGuide ? activeGuide.defaults.filter((item) => {
+    const all = Object.values(guideAnswers).flat().join(" ");
+    if (!all.trim()) return true;
+    return item.split(/[：、/]/).some((kw) => kw.length > 1 && all.includes(kw));
+  }).slice(0, 5) : [];
+  const guideQuestionOptions = (question: string) => {
+    if (question.includes("补充说明")) return [];
+    if (question.includes("当前最重要的是城市、专业还是学校层次")) return ["城市", "专业", "学校层次", "学校性质", "学校所在地周边环境", "就业资源", "家庭预算", "均衡考虑"];
+    if (question.includes("目标是冲好学校还是保好专业")) return ["冲好学校", "保好专业", "学校专业均衡", "稳妥录取优先", "先冲后稳", "不确定"];
+    if (question.includes("是否愿意用城市层级换更好的专业")) return ["愿意", "可以小幅接受", "不愿意", "看专业强度", "看城市差距", "待考虑"];
+    if (question.includes("是否愿意用专业热度换更高学校层次")) return ["愿意", "可以接受冷门但不排斥", "不愿意", "只接受相近专业", "看学校层次差距", "待考虑"];
+    if (question.includes("最不能接受的专业/城市/学校类型")) return ["不能接受冷门专业", "不能接受偏远城市", "不能接受民办", "不能接受高收费", "不能接受专科", "不能接受调剂", "暂无"];
+    if (question.includes("学费上限是多少")) return ["1万以内", "1-2万", "2-4万", "4-8万", "可接受高收费", "必须低学费"];
+    if (question.includes("是否必须公办")) return ["必须公办", "公办优先", "民办可保底", "中外合作可考虑", "不限"];
+    if (question.includes("是否接受民办/中外合作/高收费")) return ["接受民办", "接受中外合作", "接受高收费", "只接受公办", "只接受低收费", "视学校而定"];
+    if (question.includes("能否接受调剂")) return ["接受调剂", "只接受同类专业调剂", "不接受调剂", "看学校层次", "待考虑"];
+    if (question.includes("是否优先省内")) return ["必须省内", "省内优先", "周边省份可接受", "全国都可", "看学校专业决定"];
+    if (question.includes("是否考虑专科兜底")) return ["接受专科兜底", "只接受优质专科", "不接受专科", "作为最后保底", "待考虑"];
+    if (question.includes("是否未来考研")) return ["明确考研", "可能考研", "优先就业", "不考虑考研", "待考虑"];
+    if (question.includes("是否偏好稳定就业")) return ["稳定优先", "收入优先", "成长空间优先", "考公/国企优先", "不确定"];
+    if (question.includes("冷门专业换学校层次")) return ["可以接受", "只接受相近冷门", "不接受", "看学校层次提升", "待考虑"];
+    if (question.includes("低一档城市换专业质量")) return ["可以接受", "只接受省会/新一线", "不接受", "看专业强度", "待考虑"];
+    if (question.includes("家庭对风险的接受度")) return ["高风险可冲", "中等风险", "低风险稳妥", "必须保底", "家庭风险厌恶"];
+    if (question.includes("行业") || question.includes("金融") || question.includes("互联网") || question.includes("制造")) return ["金融", "互联网", "电子信息", "先进制造", "新能源", "汽车", "医疗", "教育", "国企央企"];
+    if (question.includes("气候")) return ["南方", "北方", "沿海", "干燥", "四季分明", "都可以"];
+    if (question.includes("落户") || question.includes("长期发展")) return ["落户很重要", "长期发展优先", "就业机会优先", "暂不考虑落户", "看城市政策", "无所谓"];
+    if (question.includes("大城市资源")) return ["高校资源", "实习资源", "医疗资源", "文化生活", "交通便利", "不追求大城市"];
+    if (question.includes("考研资源")) return ["很需要", "有较好高校即可", "考研氛围重要", "不准备考研", "无所谓"];
+    if (question.includes("国企") || question.includes("央企")) return ["国企优先", "央企优先", "事业单位也可", "外企/民企也可", "不看重单位性质", "待考虑"];
+    if (question.includes("城市安全感") || question.includes("通勤")) return ["安全感优先", "通勤短优先", "公共交通便利", "生活便利优先", "可接受长通勤", "无所谓"];
+    if (question.includes("成本") || question.includes("学费") || question.includes("预算")) return ["低成本", "中等", "可接受高成本", "公办优先", "可接受民办", "可接受中外合作"];
+    if (question.includes("最喜欢的高中学科")) return ["数学", "物理", "英语", "语文", "化学", "生物", "历史/政治/地理", "没有特别偏好"];
+    if (question.includes("数学/物理基础")) return ["数学强物理强", "数学强物理一般", "物理强数学一般", "两科中等", "两科偏弱", "不确定"];
+    if (question.includes("和人打交道")) return ["很喜欢", "比较喜欢", "一般", "能接受", "不太喜欢", "尽量避免"];
+    if (question.includes("实习机会")) return ["非常需要", "比较需要", "一般", "不太需要", "无所谓"];
+    if (question.includes("读研")) return ["愿意读研", "优先就业", "看录取情况", "不想读研", "待考虑"];
+    if (question.includes("就业面")) return ["越宽越好", "稳定优先", "收入优先", "专业对口优先", "无所谓"];
+    if (question.includes("转码")) return ["看重转码空间", "可接受少量编程", "不走转码路线", "完全排斥编程", "待考虑"];
+    if (question.includes("工厂") || question.includes("实验室") || question.includes("外勤")) return ["能接受工厂", "能接受实验室", "能接受外勤", "只接受办公室", "尽量避免一线现场"];
+    if (question.includes("写作") || question.includes("表达") || question.includes("材料")) return ["很喜欢", "比较喜欢", "一般", "不太喜欢", "尽量避免"];
+    if (question.includes("计算") || question.includes("建模") || question.includes("数据分析")) return ["很喜欢", "比较喜欢", "一般", "不太喜欢", "尽量避免"];
+    if (question.includes("设计") || question.includes("创意") || question.includes("内容传播")) return ["很喜欢", "比较喜欢", "一般", "不太喜欢", "尽量避免"];
+    if (question.includes("考证") || question.includes("资格考试")) return ["能接受长期考证", "只接受必要证书", "不想考证", "看专业需要", "待考虑"];
+    if (question.includes("学习难度")) return ["愿意挑战高难度", "中等难度最好", "尽量轻松", "看就业回报", "待考虑"];
+    if (question.includes("是否能接受编程")) return ["很能接受", "能接受基础编程", "只接受少量编程", "不太接受", "完全不接受", "没接触过"];
+    if (question.includes("硬件") || question.includes("电路") || question.includes("机械") || question.includes("自动化")) return ["很喜欢硬件", "喜欢电路", "喜欢机械结构", "喜欢自动化控制", "一般", "不太喜欢"];
+    if (question.includes("编程")) return ["编程", "不想编程", "可接受少量编程", "都能接受"];
+    if (question.includes("排斥") || question.includes("不能接受")) return ["医学", "土木", "化工", "师范", "农学", "管理", "销售", "无"];
+    if (question.includes("收入") || question.includes("稳定") || question.includes("考公") || question.includes("国企")) return ["高收入", "稳定", "考公", "国企", "央企", "外企", "创业", "灵活就业"];
+    if (question.includes("调剂") || question.includes("风险") || question.includes("冲")) return ["愿意冲", "稳妥优先", "接受调剂", "不接受调剂", "少量冲刺", "保专业", "保学校"];
+    if (question.includes("省内") || question.includes("离家") || question.includes("回本省")) return ["省内", "省外", "周边省份", "离家近", "毕业回本省", "全国都可"];
+    if (question.includes("公共服务") || question.includes("医疗") || question.includes("教育")) return ["很看重", "一般", "不看重", "医疗优先", "教育资源优先", "无所谓"];
+    if (question.includes("远离家乡") || question.includes("跨省")) return ["可以接受", "只接受周边", "不接受", "看城市机会", "待考虑"];
+    if (question.includes("竞争压力") || question.includes("生活节奏")) return ["能接受高压", "中等节奏", "偏慢生活", "尽量低压力", "待考虑"];
+    if (question.includes("产业集群")) return ["非常需要", "比较需要", "一般", "不看重", "看专业决定"];
+    if (question.includes("城市") || question.includes("一线") || question.includes("省会")) return ["一线", "新一线", "省会", "长三角", "珠三角", "成渝", "离家近", "不限"];
+    if (question.includes("不滑档")) return ["必须保底", "稳妥优先", "可接受少量风险", "愿意冲刺", "待考虑"];
+    if (question.includes("父母") || question.includes("家庭资源")) return ["必须兼顾", "作为参考", "自己决定", "家庭资源很重要", "待沟通"];
+    if (question.includes("偏冲刺") || question.includes("均衡") || question.includes("保守")) return ["偏冲刺", "均衡", "偏保守", "先稳后冲", "待考虑"];
+    return ["很看重", "一般", "不看重", "可以接受", "不能接受", "待考虑"];
+  };
+  const isGuideSingleChoice = (question: string) => {
+    const opts = Array.from(new Set(guideQuestionOptions(question)));
+    const degreeWords = ["很喜欢", "比较喜欢", "不太喜欢", "尽量避免", "很能接受", "不太接受", "完全不接受", "能接受基础编程", "只接受少量编程", "愿意读研", "不想读研", "明确考研", "不考虑考研"];
+    if (opts.some((item) => degreeWords.includes(item))) return true;
+    return opts.length > 0 && opts.every((item) => ["很看重", "一般", "不看重", "可以接受", "不能接受", "待考虑"].includes(item));
+  };
+  const toggleGuideAnswer = (question: string, option: string) => {
+    setGuideAnswers((prev) => {
+      const current = prev[question] || [];
+      if (isGuideSingleChoice(question)) return { ...prev, [question]: current.includes(option) ? [] : [option] };
+      return { ...prev, [question]: current.includes(option) ? current.filter((item) => item !== option) : [...current, option] };
+    });
+  };
+
+  const submitGuide = async () => {
+    if (!guideMode) return;
+    setGuideSubmitted(true);
+    setGuideLoading(true);
+    setGuideProgress(8);
+    setGuideResult("");
+    setGuideData(null);
+    try {
+      const response = await fetch("/api/gaokao/guide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: guideConfig[guideMode].title, answers: guideAnswers }) });
+      if (!response.ok) throw new Error("guide failed");
+      const data = await response.json();
+      const guide = data?.guide || null;
+      const markdown = String(data?.markdown || "");
+      setGuideData(guide);
+      setGuideResult(markdown);
+      saveGuideHistory({ id: `${Date.now()}`, title: `${guideConfig[guideMode].title}-${new Date().toLocaleString()}`, mode: guideConfig[guideMode].title, createdAt: new Date().toISOString(), data: guide || markdown, answers: guideAnswers });
+    } catch {
+      setGuideResult(`### 暂时无法完成深度联网评估\n\n${(guideRecommendation.length ? guideRecommendation : activeGuide?.defaults || []).map((item) => `- ${item}`).join("\n")}`);
+    } finally {
+      setGuideProgress(100);
+      setGuideLoading(false);
+    }
+  };
+
+  const reportSteps = [
+    { label: "整理需求", start: 0, doneAt: 24 },
+    { label: "生成初稿", start: 25, doneAt: 59 },
+    { label: "复核报告", start: 60, doneAt: 84 },
+    { label: "生成终稿", start: 85, doneAt: 100 },
+  ];
+  const activeReportStep = reportSteps.find((step) => reportProgress >= step.start && reportProgress <= step.doneAt) || reportSteps[reportSteps.length - 1];
+
   return (
     <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-surface text-text-primary">
       <header className="shrink-0 border-b border-surface-border bg-surface-elevated/85 px-4 py-3 backdrop-blur-xl">
@@ -1049,10 +1399,10 @@ export default function GaokaoVolunteerPage() {
             <h1 className="truncate text-lg font-semibold tracking-tight text-text-primary">
               {activeTrack ? `${activeTrack}专项` : t("gaokao.navLabel")}
             </h1>
-            <p className="mt-0.5 truncate text-xs text-text-tertiary">{activeTrack ? `当前在${activeTrack}专项工作台` : "选择填报入口"}</p>
+            <p className="mt-0.5 truncate text-xs text-text-tertiary">{activeTrack ? "本报告由 AI 基于公开资料和模型分析生成，仅供志愿规划参考，最终以考试院和高校官方信息为准" : "选择填报入口"}</p>
           </div>
-          <button onClick={openSettings} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-surface-border bg-surface-card text-text-secondary transition hover:border-neutral-400 hover:text-neutral-950 dark:hover:text-white" aria-label="设置">
-            <SlidersHorizontal className="h-4 w-4" />
+          <button onClick={() => activeTrack ? openSettings() : setGuideHistoryOpen(true)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-surface-border bg-surface-card text-text-secondary transition hover:border-neutral-400 hover:text-neutral-950 dark:hover:text-white" aria-label={activeTrack ? "设置" : "历史记录"}>
+            {activeTrack ? <SlidersHorizontal className="h-4 w-4" /> : <History className="h-4 w-4" />}
           </button>
         </div>
       </header>
@@ -1088,6 +1438,97 @@ export default function GaokaoVolunteerPage() {
               )}
             </div>
           </aside>
+        </div>
+      )}
+
+      {guideHistoryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6 backdrop-blur-sm">
+          <div className="max-h-[86vh] w-full max-w-3xl overflow-hidden rounded-[2rem] border border-surface-border bg-surface-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-surface-border px-6 py-5">
+              <div><div className="text-xl font-semibold text-text-primary">推荐文档历史记录</div><p className="mt-1 text-sm text-text-tertiary">城市/专业/综合推荐生成后会保存为可下载文档。</p></div>
+              <button onClick={() => setGuideHistoryOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-surface-border text-text-tertiary hover:text-text-primary"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="max-h-[68vh] overflow-y-auto p-5">
+              {guideHistory.length === 0 ? <div className="rounded-2xl border border-dashed border-surface-border p-6 text-sm text-text-tertiary">暂无历史记录。提交问卷生成建议后会显示在这里。</div> : <div className="space-y-3">{guideHistory.map((record) => <div key={record.id} className="rounded-2xl border border-surface-border bg-surface-elevated/45 p-4"><div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-text-primary">{record.title}</div><div className="mt-1 text-xs text-text-tertiary">{record.mode} · {new Date(record.createdAt).toLocaleString()}</div></div><button onClick={() => downloadGuideRecord(record)} className="rounded-xl bg-neutral-950 px-3 py-2 text-xs text-white dark:bg-white dark:text-neutral-950">下载文档</button></div><pre className="mt-3 max-h-32 overflow-hidden whitespace-pre-wrap rounded-xl bg-surface-card p-3 text-xs leading-5 text-text-secondary">{guideRecordToMarkdown(record)}</pre></div>)}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6 backdrop-blur-sm">
+          <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[2rem] border border-surface-border bg-surface-card shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-surface-border px-6 py-5">
+              <div>
+                <div className="text-xl font-semibold text-text-primary">{activeGuide.title}</div>
+                <p className="mt-1 text-sm text-text-tertiary">{activeGuide.desc}</p>
+              </div>
+              <button type="button" onClick={() => setGuideMode(null)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-surface-border text-text-tertiary transition hover:text-text-primary"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-y-auto p-6">
+              {!guideSubmitted && <div className="max-h-[64vh] overflow-y-auto rounded-2xl border border-surface-border">
+                <table className="w-full text-left text-base">
+                  <thead className="sticky top-0 bg-surface-elevated text-sm text-text-tertiary"><tr><th className="w-16 px-4 py-3">序号</th><th className="px-4 py-3">问题</th><th className="px-4 py-3">回答</th></tr></thead>
+                  <tbody>
+                    {activeGuide.questions.map((question, index) => (
+                      <tr key={question} className="border-t border-surface-border">
+                        <td className="px-4 py-3 text-text-tertiary">{index + 1}</td>
+                        <td className="px-4 py-3 font-medium leading-6 text-text-primary">{question}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1.5">
+                            {Array.from(new Set(guideQuestionOptions(question))).map((option) => {
+                              const selected = (guideAnswers[question] || []).includes(option);
+                              return <button key={option} type="button" onClick={() => toggleGuideAnswer(question, option)} className={cn("rounded-full border px-3 py-1.5 text-sm transition", selected ? "border-neutral-950 bg-neutral-950 text-white dark:border-white dark:bg-white dark:text-neutral-950" : "border-surface-border bg-surface text-text-secondary hover:border-neutral-400 hover:text-text-primary")}>{option}</button>;
+                            })}
+                          </div>
+                          {question.includes("补充说明") && (
+                            <textarea value={(guideAnswers[question] || [""])[0]} onChange={(e) => setGuideAnswers((prev) => ({ ...prev, [question]: [e.target.value] }))} placeholder="可自主填写补充说明" className="mt-2 min-h-[88px] w-full rounded-xl border border-surface-border bg-surface px-3 py-2 text-sm outline-none focus:border-neutral-400" />
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>}
+              {guideSubmitted && (
+                <div className="rounded-2xl border border-surface-border bg-surface-elevated/45 p-5">
+                  <div className="text-lg font-semibold text-text-primary">{activeGuide.resultTitle}</div>
+                  <p className="mt-1 text-sm leading-6 text-text-tertiary">提交后由多智能体协同联网评估生成完整建议。</p>
+                  {guideLoading ? (
+                    <div className="mt-4 rounded-2xl bg-surface-card px-5 py-5 text-sm leading-6 text-text-secondary">
+                      <div className="flex items-center justify-between gap-3"><div className="font-semibold text-text-primary">多智能体协同评估中</div><div className="text-xs text-text-tertiary">{guideProgress}%</div></div>
+                      <div className="mt-3 h-2 rounded-full bg-surface-elevated"><div className="h-2 rounded-full bg-neutral-950 transition-all duration-700 dark:bg-white" style={{ width: `${guideProgress}%` }} /></div>
+                      <div className="mt-4 grid gap-2 text-xs text-text-tertiary md:grid-cols-4">
+                        {[{label:"整理问卷",done:guideProgress>=18},{label:"联网检索",done:guideProgress>=42},{label:"协同评估",done:guideProgress>=68},{label:"生成图表",done:guideProgress>=88}].map((step) => <div key={step.label} className={cn("rounded-xl border px-3 py-2", step.done ? "border-neutral-300 bg-surface-elevated text-text-primary" : "border-surface-border bg-surface")}>{step.done ? "✓ " : "· "}{step.label}</div>)}
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        <div className="h-3 w-4/5 animate-pulse rounded-full bg-surface-elevated" />
+                        <div className="h-3 w-2/3 animate-pulse rounded-full bg-surface-elevated" />
+                        <div className="h-3 w-3/4 animate-pulse rounded-full bg-surface-elevated" />
+                      </div>
+                    </div>
+                  ) : guideData ? (
+                    <div className="mt-4 max-h-[64vh] space-y-5 overflow-y-auto text-base leading-7 text-text-secondary">
+                      <div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{cleanGuideText(guideData.title)}</div><p className="mt-1">{cleanGuideText(guideData.summary)}</p></div>
+                      <div className="space-y-3">
+                        {(guideData.table_rows || []).map((row: any) => <div key={row.name} className="rounded-2xl border border-surface-border bg-surface-card p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="text-lg font-semibold text-text-primary">{cleanGuideText(row.name)}</div><div className="rounded-full bg-neutral-950 px-3 py-1 text-sm text-white dark:bg-white dark:text-neutral-950">{row.score} 分</div></div><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{(row.cells || []).map((cell: string, idx: number) => <div key={idx} className="rounded-xl bg-surface-elevated/60 p-3"><div className="mb-1 text-sm font-medium text-text-primary">{guideData.table_columns?.[idx] || `维度${idx + 1}`}</div><div className="text-sm leading-6 text-text-secondary break-words">{cleanGuideText(cell)}</div></div>)}</div></div>)}
+                      </div>
+                      <div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{guideData.bar_chart?.title || "匹配度"}</div><div className="mt-3 space-y-2">{(guideData.bar_chart?.items || []).map((item: any) => <div key={item.label}><div className="mb-1 flex justify-between text-sm"><span className="break-words">{item.label}</span><span>{item.value}</span></div><div className="h-2 rounded-full bg-surface-elevated"><div className="h-2 rounded-full bg-neutral-900 dark:bg-white" style={{ width: `${Math.min(100, Math.max(0, Number(item.value) || 0))}%` }} /></div></div>)}</div></div>
+                      <div className="grid gap-3 md:grid-cols-2"><div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{guideData.pie_chart?.title || "因素权重"}</div><div className="mt-2 space-y-1">{(guideData.pie_chart?.items || []).map((item: any) => <div key={item.label} className="flex justify-between gap-3 text-sm"><span className="break-words">{item.label}</span><span>{item.value}%</span></div>)}</div></div><div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{guideData.trend_chart?.title || "趋势"}</div><div className="mt-2 flex h-24 items-end gap-2">{(guideData.trend_chart?.items || []).map((item: any) => <div key={item.label} className="flex flex-1 flex-col items-center gap-1"><div className="w-full rounded-t bg-neutral-900 dark:bg-white" style={{ height: `${Math.max(8, Math.min(90, Number(item.value) || 0))}%` }} /><span className="max-w-24 break-words text-center text-xs text-text-tertiary">{item.label}</span></div>)}</div></div></div>
+                      <div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">下一步</div><ul className="mt-2 list-disc space-y-1 pl-5">{(guideData.next_steps || []).map((step: string) => <li key={step}>{step}</li>)}</ul></div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 max-h-[56vh] overflow-y-auto whitespace-pre-wrap rounded-xl bg-surface-card px-4 py-3 text-sm leading-6 text-text-secondary">{guideResult || "暂无建议"}</div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-surface-border px-6 py-4">
+              <button type="button" onClick={() => setGuideMode(null)} className="rounded-xl border border-surface-border px-4 py-2 text-sm text-text-secondary hover:text-text-primary">关闭</button>
+              {guideSubmitted && !guideLoading && <button type="button" onClick={() => { setGuideSubmitted(false); setGuideData(null); setGuideResult(""); }} className="rounded-xl border border-surface-border px-5 py-2.5 text-base font-medium text-text-secondary hover:text-text-primary">返回表格</button>}
+              <button type="button" onClick={submitGuide} disabled={guideLoading} className="rounded-xl bg-neutral-950 px-5 py-2.5 text-base font-medium text-white disabled:opacity-60 dark:bg-white dark:text-neutral-950">{guideLoading ? "生成中..." : guideSubmitted ? "重新生成评估" : "提交问卷，启动协同评估"}</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1128,7 +1569,18 @@ export default function GaokaoVolunteerPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">双模型 Advisor</div>DeepSeek + GPT 协同分析，生成可解释方案。</div>
+              {(["city", "major", "comprehensive"] as const).map((mode) => (
+                <button key={mode} type="button" onClick={() => { setGuideMode(mode); setGuideAnswers({}); setGuideSubmitted(false); setGuideResult(""); setGuideData(null); }} className="group rounded-[1.75rem] border border-surface-border bg-surface-card/90 p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-neutral-400 hover:shadow-lg hover:shadow-black/5">
+                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface-elevated text-neutral-950 dark:text-white"><Sparkles className="h-5 w-5" /></div>
+                  <div className="text-lg font-semibold text-text-primary">{guideConfig[mode].title}</div>
+                  <p className="mt-2 min-h-[72px] text-sm leading-relaxed text-text-secondary">{guideConfig[mode].desc}</p>
+                  <div className="mt-5 inline-flex items-center gap-1 text-sm font-medium text-neutral-950 dark:text-white">打开问卷 <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" /></div>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">双模型 Advisor</div>多智能体协同分析，生成可解释方案。</div>
               <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">来源可核验</div>展示考试院、招生网、第三方链接，点击即可跳转。</div>
               <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">对话可修改</div>进入专项后可用右下角 Agent 继续调整条件。</div>
             </div>
@@ -1140,19 +1592,19 @@ export default function GaokaoVolunteerPage() {
           <section className="space-y-4 rounded-3xl border border-surface-border bg-surface-card/90 p-4 shadow-sm">
             <div>
               <div className="flex items-center gap-2 text-base font-semibold text-text-primary"><GraduationCap className="h-4 w-4 text-neutral-950 dark:text-white" /> {activeTrack}专项要求</div>
-              <p className="mt-1 text-xs leading-relaxed text-text-tertiary">只生成{activeTrack}通道方案；修改条件后点击右侧查询。</p>
+              <p className="mt-1 text-xs leading-relaxed text-text-tertiary">先填必填项，再点击下方生成报告；偏好项可留空。</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="省份">
+              <Field label="省份" required>
                 <select className={inputClass} value={profile.province} onChange={(e) => updateField("province", e.target.value)}>
                   <option value="">请选择</option>
                   {provinceOptions.map((province) => <option key={province} value={province}>{province}</option>)}
                 </select>
               </Field>
-              <Field label="分数"><input className={inputClass} type="number" value={profile.score} placeholder="请输入" onChange={(e) => updateField("score", e.target.value === "" ? "" : Number(e.target.value))} /></Field>
+              <Field label="分数" required><input className={inputClass} type="number" value={profile.score} placeholder="请输入" onChange={(e) => updateField("score", e.target.value === "" ? "" : Number(e.target.value))} /></Field>
             </div>
-            <Field label="全省位次"><input className={inputClass} type="number" value={profile.rank} placeholder="请输入" onChange={(e) => updateField("rank", e.target.value === "" ? "" : Number(e.target.value))} /></Field>
-            <Field label="选科 / 科类">
+            <Field label="全省位次" required><input className={inputClass} type="number" value={profile.rank} placeholder="请输入" onChange={(e) => updateField("rank", e.target.value === "" ? "" : Number(e.target.value))} /></Field>
+            <Field label="选科 / 科类" required>
               <select className={inputClass} value={profile.subjects} onChange={(e) => updateField("subjects", e.target.value)}>
                 <option value="">请选择</option>
                 {subjectOptions.map((subject) => <option key={subject} value={subject}>{subject}</option>)}
@@ -1178,6 +1630,9 @@ export default function GaokaoVolunteerPage() {
               <label className="flex items-center gap-2"><input type="checkbox" checked={profile.acceptCooperation} onChange={(e) => updateField("acceptCooperation", e.target.checked)} /> 接受中外合作</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={profile.obeyAdjustment} onChange={(e) => updateField("obeyAdjustment", e.target.checked)} /> 倾向服从调剂</label>
             </div>
+            <button onClick={() => runAdvisor(profile, `进入${activeTrack}专项，按当前条件生成完整志愿报告`, activeTrack)} disabled={advisorLoading} className="mt-2 flex w-full items-center justify-center rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-70 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200">
+              {advisorLoading ? "正在生成报告..." : "生成报告"}
+            </button>
           </section>
         </aside>
 
@@ -1213,14 +1668,9 @@ export default function GaokaoVolunteerPage() {
 
         <aside className="flex min-h-0 flex-col overflow-hidden bg-[#f7f7fb] px-4 py-5 dark:bg-surface-elevated/35">
           <div className="mb-4 rounded-[28px] border border-surface-border bg-surface-card shadow-sm">
-            <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
-              <div>
-                <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-text-primary">输出</h2>
-                <p className="mt-1 text-xs text-text-tertiary">像 Notebook 一样生成文件，点击预览或下载。</p>
-              </div>
-              <button onClick={() => runAdvisor(profile, `进入${activeTrack}专项，按当前条件生成完整志愿报告`, activeTrack)} disabled={advisorLoading} className="rounded-full bg-neutral-950 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-black/10 transition hover:bg-neutral-800 disabled:opacity-70 dark:bg-white dark:text-neutral-950">
-                生成报告
-              </button>
+            <div className="border-b border-surface-border px-5 py-4">
+              <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-text-primary">历史记录</h2>
+              <p className="mt-1 text-xs text-text-tertiary">生成过的报告会一直保留在这里，悬浮记录可打开更多操作。</p>
             </div>
             <div className="px-5 pb-4 pt-3">
               <div className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">文件</div>
@@ -1229,48 +1679,72 @@ export default function GaokaoVolunteerPage() {
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-[28px] border border-surface-border bg-surface-card p-4 shadow-sm">
             {advisorLoading && (
-              <div className="mb-2 rounded-[18px] bg-surface-elevated/70 px-2.5 py-3">
+              <div className="mb-2 rounded-[18px] bg-surface-elevated/70 px-3 py-3.5">
                 <div className="flex items-center gap-3.5 pr-2 text-left">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center">
                     <RefreshCw className="h-[25px] w-[25px] animate-spin text-neutral-950 dark:text-white" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{activeTrack}专项志愿规划报告</div>
-                    <div className="mt-1 text-[12px] leading-4 text-text-tertiary">正在后台查询、分析并生成文件...</div>
+                    <div className="mt-1 flex items-center justify-between gap-3 text-[12px] leading-4 text-text-tertiary">
+                      <span>{activeReportStep.label}</span>
+                      <span>{reportProgress}%</span>
+                    </div>
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-200/80 dark:bg-surface-border">
+                      <div className="h-full rounded-full bg-neutral-950 transition-all duration-500 ease-out dark:bg-white" style={{ width: `${reportProgress}%` }} />
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 gap-1 text-[10px] text-text-tertiary">
+                      {reportSteps.map((step) => {
+                        const active = step.label === activeReportStep.label;
+                        const completed = reportProgress > step.doneAt;
+                        return (
+                          <div key={step.label} className={cn(
+                            "truncate rounded-full px-1.5 py-0.5 text-center transition-colors",
+                            active ? "bg-neutral-950 text-white dark:bg-white dark:text-neutral-950" : completed ? "bg-neutral-200 text-neutral-700 dark:bg-surface-border dark:text-text-secondary" : "bg-surface-card"
+                          )}>{step.label}</div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {!advisorResult && !advisorLoading ? (
+            {reportHistory.length === 0 && !advisorLoading ? (
               <div className="flex h-full flex-col items-center justify-center px-6 text-center">
                 <div className="relative mb-4 text-text-tertiary">
                   <Sparkles className="absolute -right-2 -top-1 h-3.5 w-3.5 text-neutral-950 dark:text-white" />
                   <FileText className="h-9 w-9" />
                 </div>
-                <p className="text-sm font-medium text-text-primary">还没有生成文件</p>
-                <p className="mt-2 max-w-[260px] text-xs leading-5 text-text-tertiary">点击右上角“生成报告”，完成后这里会出现报告文件。</p>
+                <p className="text-sm font-medium text-text-primary">还没有历史记录</p>
+                <p className="mt-2 max-w-[260px] text-xs leading-5 text-text-tertiary">点击右上角“生成报告”，完成后历史记录会一直保留在这里。</p>
               </div>
-            ) : advisorResult ? (
+            ) : (
               <div className="space-y-1.5">
-                <div className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
-                  <div className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-20 text-left">
-                    <button type="button" onClick={() => setReportPreviewOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center">
-                      <FileText className="h-[25px] w-[25px] text-neutral-950 dark:text-white" />
+                {reportHistory.map((item) => (
+                  <div key={item.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
+                    <button type="button" onClick={() => { setAdvisorResult(item.result); setReportPreviewOpen(true); setOpenReportMenuId(null); }} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-12 text-left">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center"><FileText className="h-[25px] w-[25px] text-neutral-950 dark:text-white" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{item.title}</span>
+                        <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
+                          <span className="truncate">{item.subtitle}</span><span>·</span><span>{item.createdAtLabel}</span>
+                        </span>
+                      </span>
                     </button>
-                    <button type="button" onClick={() => setReportPreviewOpen(true)} className="min-w-0 flex-1 text-left">
-                      <div className="truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{activeTrack}专项志愿规划报告</div>
-                      <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
-                        <span className="truncate">报告 · 院校 · 来源</span><span>·</span><span>刚刚</span>
+                    <button type="button" onClick={(event) => { event.stopPropagation(); setOpenReportMenuId((id) => id === item.id ? null : item.id); }} className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-text-tertiary opacity-0 transition hover:bg-surface-hover hover:text-neutral-950 dark:text-white group-hover:opacity-100" title="更多操作">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </button>
+                    {openReportMenuId === item.id && (
+                      <div className="absolute right-2 top-10 z-20 w-28 overflow-hidden rounded-2xl border border-surface-border bg-surface-card py-1 text-sm shadow-xl">
+                        <button type="button" onClick={(event) => { event.stopPropagation(); downloadAdvisorReport(item.result); setOpenReportMenuId(null); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-text-secondary hover:bg-surface-hover hover:text-text-primary"><Download className="h-3.5 w-3.5" />下载</button>
+                        <button type="button" onClick={(event) => { event.stopPropagation(); deleteReportHistoryItem(item.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" />删除</button>
                       </div>
-                    </button>
-                    <button type="button" onClick={exportReport} className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-text-tertiary opacity-0 transition hover:bg-surface-hover hover:text-neutral-950 dark:text-white group-hover:opacity-100" title="下载">
-                      <Download className="h-4 w-4" />
-                    </button>
+                    )}
                   </div>
-                </div>
+                ))}
               </div>
-            ) : null}
+            )}
           </div>
         </aside>
       </main>
@@ -1288,8 +1762,32 @@ export default function GaokaoVolunteerPage() {
             </div>
             <div className="min-h-0 flex-1 overflow-auto bg-surface-card p-6">
               <article className="mx-auto max-w-4xl text-sm leading-7 text-text-secondary">
+                {advisorResult.final_report_markdown ? (
+                  <div ref={reportArticleRef} className="max-w-none text-text-secondary">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        h1: ({ children }) => <h1 className="mb-5 border-b border-surface-border pb-4 text-3xl font-semibold tracking-[-0.03em] text-text-primary">{children}</h1>,
+                        h2: ({ children }) => <h2 className="mb-3 mt-8 text-xl font-semibold tracking-[-0.02em] text-text-primary">{children}</h2>,
+                        h3: ({ children }) => <h3 className="mb-2 mt-5 text-base font-semibold text-text-primary">{children}</h3>,
+                        p: ({ children }) => <p className="my-3 text-sm leading-7 text-text-secondary">{children}</p>,
+                        ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-5 text-sm leading-7 text-text-secondary">{children}</ul>,
+                        ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-5 text-sm leading-7 text-text-secondary">{children}</ol>,
+                        blockquote: ({ children }) => <blockquote className="my-4 border-l-4 border-neutral-300 bg-neutral-50 px-4 py-2 text-sm leading-7 text-text-secondary dark:border-surface-border dark:bg-surface-elevated/50">{children}</blockquote>,
+                        table: ({ children }) => <div className="my-5 overflow-x-auto rounded-2xl border border-surface-border"><table className="min-w-full border-collapse text-left text-xs">{children}</table></div>,
+                        thead: ({ children }) => <thead className="bg-neutral-100 text-text-primary dark:bg-surface-elevated">{children}</thead>,
+                        th: ({ children }) => <th className="whitespace-nowrap border-b border-surface-border px-3 py-2.5 font-semibold text-text-primary">{children}</th>,
+                        td: ({ children }) => <td className="align-top border-b border-surface-border px-3 py-2.5 text-text-secondary last:border-b-0">{children}</td>,
+                        strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
+                      }}
+                    >
+                      {advisorResult.final_report_markdown}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div>
                   <h2 className="text-3xl font-semibold tracking-[-0.03em] text-text-primary">{activeTrack}专项志愿规划报告</h2>
-                  <p className="mt-3 text-base leading-8 text-text-secondary">{advisorResult.agent_analysis?.summary || "已生成专项推荐。"}</p>
+                  <p className="mt-3 text-base leading-8 text-text-secondary">这份报告根据你填写的省份、分数、位次、选科和偏好，综合院校层次、专业匹配度、位次风险和可核验来源生成。模型调用和复核过程已在后台完成，以下只保留面向填报决策的结论。</p>
 
                   {(advisorResult.professional_report?.profile_summary || advisorResult.professional_report?.strategy_summary) && (
                     <section className="mt-6 rounded-2xl border border-surface-border bg-surface-elevated/55 p-5">
@@ -1329,7 +1827,7 @@ export default function GaokaoVolunteerPage() {
                           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-neutral-100 text-sm font-semibold text-neutral-950 dark:bg-surface-elevated dark:text-white">{index + 1}</div>
                           <div>
                             <div className="font-semibold text-text-primary">{item.school}</div>
-                            <div className="mt-1 text-xs text-text-tertiary">{item.school_level || "层级待核验"} · {item.city || "城市待核验"} · 参考位次 {item.reference_rank || "-"}</div>
+                            <div className="mt-1 text-xs text-text-tertiary">{item.school_level && item.school_level !== "联网待复核" ? item.school_level : "参考候选"} · {item.city || "城市待核验"} · 参考位次 {item.reference_rank || "-"}</div>
                             <div className="mt-2 text-sm text-text-secondary">推荐专业：{item.recommended_majors || "待核验"}</div>
                             {item.why_recommend && <div className="mt-1 text-sm text-text-secondary">理由：{item.why_recommend}</div>}
                             {Array.isArray(item.strength_tags) && item.strength_tags.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{item.strength_tags.map((tag: string) => <span key={tag} className="rounded-full border border-surface-border px-2 py-0.5 text-[11px] text-text-tertiary">{tag}</span>)}</div>}
@@ -1380,6 +1878,8 @@ export default function GaokaoVolunteerPage() {
                     <ul className="mt-2 list-disc space-y-1 pl-5">{(advisorResult.professional_report?.risk_notes || []).map((note: string) => <li key={note}>{note}</li>)}</ul>
                     <p className="mt-3 text-xs text-text-tertiary">{advisorResult.professional_report?.disclaimer}</p>
                   </section>
+                  </div>
+                )}
                 </article>
             </div>
           </div>

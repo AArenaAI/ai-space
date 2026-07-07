@@ -139,7 +139,7 @@ export function useCredits() {
 
   const fetchBetaConfig = useCallback(async () => {
     try {
-      const res = await fetch("/api/beta/config");
+      const res = await apiFetch("/beta/config");
       if (!res.ok) return;
       const data = (await res.json()) as BetaPublicConfig;
       if (data.batch_model_rules) {

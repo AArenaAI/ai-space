@@ -51,6 +51,7 @@ assert.ok(
 
 for (const [name, source] of [['MobileNav', mobile], ['AppSidebar', desktop]]) {
   assert.ok(source.includes('useChatSidebarHistory({'), `${name} should use shared sidebar history hook`);
+  assert.ok(source.includes('workspaceId: currentWS?.id'), `${name} should pass the active workspace into shared sidebar history`);
   assert.ok(!source.includes('parseSidebarCursor'), `${name} should not duplicate cursor parsing`);
   assert.ok(!source.includes('applySidebarConversationActivity'), `${name} should not duplicate activity merge logic`);
   assert.ok(!source.includes('hasMoreSidebarConversations'), `${name} should not duplicate has-more logic`);

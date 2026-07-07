@@ -12,7 +12,7 @@ import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRunt
 import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
 import { AssistantAnswerRenderer } from "./AssistantAnswerRenderer";
 import { normalizeSearchSources } from "@/lib/searchSources";
-import AssistantPendingShell from "./AssistantPendingShell";
+
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
 
@@ -166,10 +166,6 @@ export function AssistantMessageContent({
         <FailureActivityEntry sourceCount={sourceCount} onOpenActivity={onOpenActivity} inlineActivity={inlineActivity} />
       </>
     );
-  }
-
-  if (generating && !realtimeHasVisiblePayload && !runtimeState.content) {
-    return <AssistantPendingShell />;
   }
 
   if (!shouldRenderStreamingText && !runtimeState.content) {
