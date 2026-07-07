@@ -592,8 +592,8 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
     <div className="relative flex h-full flex-col overflow-hidden">
       {/* 顶部栏 - 对比模式下隐藏，释放垂直空间 */}
       {!activeCompareMode && (
-        <header className="relative z-20 shrink-0 h-12 flex items-center justify-between px-4 transition-all duration-300">
-          <div className="flex items-center">
+        <header className="relative z-20 shrink-0 flex min-h-12 items-center justify-between gap-2 px-3 py-1.5 transition-all duration-300 md:h-12 md:px-4 md:py-0">
+          <div className="flex min-w-0 flex-1 items-center md:flex-none">
             <ModelSelector
               models={models}
               selected={selectedModel}
@@ -610,7 +610,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
 
           {/* 中间：对话标题 + 编辑 */}
           {conversationTitle && (
-            <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 max-w-[50%]">
+            <div className="absolute left-1/2 hidden max-w-[50%] -translate-x-1/2 items-center gap-1.5 md:flex">
               <span className="text-base font-bold text-text-primary truncate">{conversationTitle}</span>
               <button
                 onClick={() => setRenameOpen(true)}
@@ -622,7 +622,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
             </div>
           )}
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <ThemeToggle />
           </div>
         </header>
@@ -828,7 +828,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           "z-[70] absolute inset-x-0 bottom-0 transition-[right,opacity,transform] duration-200 ease-out opacity-100 translate-y-0 scale-100 pointer-events-auto",
           activityPanelOpen && !activeCompareMode && CHAT_ACTIVITY_PANEL_WIDTH_CLASS,
         )}>
-          <div className="pointer-events-none bg-gradient-to-t from-surface-elevated via-surface-elevated via-60% to-transparent pt-10">
+          <div className="pointer-events-none bg-gradient-to-t from-surface-elevated via-surface-elevated via-60% to-transparent px-2 pt-6 md:px-0 md:pt-10">
             <div className="pointer-events-auto relative z-[70]">
               <MessageInput
                 onSend={handleSend}

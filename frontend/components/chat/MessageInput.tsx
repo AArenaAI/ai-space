@@ -752,7 +752,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "relative flex min-h-[134px] flex-col overflow-visible rounded-2xl border transition-all duration-300",
+            "relative flex min-h-[112px] flex-col overflow-visible rounded-2xl border transition-all duration-300 md:min-h-[134px]",
             "bg-surface-card",
             dragOver
               ? "border-brand/60 border-dashed shadow-[0_0_0_1px_rgba(59,130,246,0.15),0_0_20px_rgba(59,130,246,0.1)]"
@@ -908,27 +908,27 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
             placeholder={t("chat.placeholder")}
             rows={1}
             className={cn(
-              "w-full min-h-[92px] shrink-0 resize-none overflow-hidden bg-transparent px-4 pb-1 text-[15px] font-normal leading-6 text-slate-900 outline-none placeholder:text-slate-400 [font-family:Inter,'PingFang_SC','Microsoft_YaHei',sans-serif] dark:text-text-primary dark:placeholder:text-text-tertiary",
+              "w-full min-h-[72px] shrink-0 resize-none overflow-hidden bg-transparent px-3 pb-1 text-[15px] font-normal leading-6 text-slate-900 outline-none placeholder:text-slate-400 [font-family:Inter,'PingFang_SC','Microsoft_YaHei',sans-serif] dark:text-text-primary dark:placeholder:text-text-tertiary md:min-h-[92px] md:px-4",
               attachedFiles.length > 0 ? "pt-3" : "pt-4"
             )}
           />
 
-          <div className="flex items-center justify-between px-3 pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2 md:px-3 md:pb-3">
             {/* 左侧：联网搜索 + 深度思考 → 合并为工具悬浮选择 */}
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               {/* 工具悬浮按钮：联网搜索 + 深度思考 */}
               <div className="relative" ref={toolsRef} onMouseEnter={handleToolsEnter} onMouseLeave={handleToolsLeave}>
                 <button
                   type="button"
                   className={cn(
-                    "flex items-center gap-1.5 pl-3 pr-3 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200",
+                    "flex items-center gap-1.5 pl-2.5 pr-2.5 py-1.5 text-[13px] font-medium rounded-full border transition-all duration-200 md:pl-3 md:pr-3",
                     effectiveSearchEnabled
                       ? "border-surface-border bg-surface-card text-text-primary shadow-sm"
                       : "border-surface-border bg-transparent text-text-tertiary hover:text-text-secondary hover:border-text-tertiary/50"
                   )}
                 >
                   <Wrench className="w-3.5 h-3.5" />
-                  <span>{t("chat.tools")}</span>
+                  <span className="hidden sm:inline">{t("chat.tools")}</span>
                   {effectiveSearchEnabled && (
                     <span className="text-[11px] opacity-70 ml-0.5">· {t("chat.webSearch")}</span>
                   )}
@@ -970,25 +970,25 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="relative mr-1" ref={reasoningRef}>
+            <div className="ml-auto flex min-w-0 items-center gap-1.5 md:gap-2">
+              <div className="relative md:mr-1" ref={reasoningRef}>
                 <button
                   type="button"
                   onClick={() => setReasoningOpen((open) => !open)}
                   className={cn(
-                    "flex items-center gap-1.5 pl-3 pr-2.5 py-1.5 text-[13px] font-medium rounded-full transition-colors duration-200",
+                    "flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-[13px] font-medium rounded-full transition-colors duration-200 md:pl-3 md:pr-2.5",
                     reasoning.enabled
                       ? "bg-surface-card text-text-primary hover:bg-surface-elevated"
                       : "bg-surface-card text-text-secondary hover:text-text-primary hover:bg-surface-elevated"
                   )}
                 >
                   {currentReasoningMode.icon}
-                  <span>{currentReasoningMode.label}</span>
+                  <span className="max-w-[4.5rem] truncate sm:max-w-none">{currentReasoningMode.label}</span>
                   <ChevronDown className="w-3.5 h-3.5 opacity-60" />
                 </button>
 
                 {reasoningOpen && (
-                  <div className="absolute bottom-full right-0 mb-2 w-64 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-2 animate-fade-in overflow-hidden">
+                  <div className="absolute bottom-full right-0 mb-2 w-[min(16rem,calc(100vw-1rem))] rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[90] py-2 animate-fade-in overflow-hidden">
                     <div className="px-3 py-1.5 text-[11px] font-medium text-text-tertiary uppercase tracking-wider border-b border-surface-border mb-1">
                       {t("messageInput.thinking.selectIntensity")}
                     </div>

@@ -24,18 +24,18 @@ export default function ChatShellLayout({ children }: { children: React.ReactNod
   useFlushOnUnload();
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-surface-elevated">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-surface-elevated">
       <Suspense fallback={null}>
         <MobileNav />
       </Suspense>
 
-      <div className="flex min-h-0 flex-1 p-2 pl-0">
+      <div className="flex min-h-0 flex-1 p-0 md:p-2 md:pl-0">
         <div className="hidden shrink-0 md:block">
           <Suspense fallback={null}>
             {mounted ? <AppSidebar /> : <div className="w-[272px]" />}
           </Suspense>
         </div>
-        <main className="min-w-0 flex-1 overflow-hidden rounded-[24px] border border-surface-border/70 bg-surface shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+        <main className="min-w-0 flex-1 overflow-hidden bg-surface shadow-[0_16px_40px_rgba(15,23,42,0.04)] md:rounded-[24px] md:border md:border-surface-border/70">
           {children}
         </main>
       </div>

@@ -1389,17 +1389,17 @@ export default function GaokaoVolunteerPage() {
   const activeReportStep = reportSteps.find((step) => reportProgress >= step.start && reportProgress <= step.doneAt) || reportSteps[reportSteps.length - 1];
 
   return (
-    <div className="flex h-screen min-w-0 flex-col overflow-hidden bg-surface text-text-primary">
-      <header className="shrink-0 border-b border-surface-border bg-surface-elevated/85 px-4 py-3 backdrop-blur-xl">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-surface text-text-primary md:h-screen">
+      <header className="shrink-0 border-b border-surface-border bg-surface-elevated/85 px-3 py-2.5 backdrop-blur-xl md:px-4 md:py-3">
         <div className="grid grid-cols-[44px_1fr_44px] items-center gap-3">
           <button onClick={handlePageBack} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-surface-border bg-surface-card text-text-secondary transition hover:border-neutral-400 hover:text-neutral-950 dark:hover:text-white" aria-label="返回上一层">
             <ArrowRight className="h-4 w-4 rotate-180" />
           </button>
           <div className="min-w-0 text-center">
-            <h1 className="truncate text-lg font-semibold tracking-tight text-text-primary">
+            <h1 className="truncate text-base font-semibold tracking-tight text-text-primary md:text-lg">
               {activeTrack ? `${activeTrack}专项` : t("gaokao.navLabel")}
             </h1>
-            <p className="mt-0.5 truncate text-xs text-text-tertiary">{activeTrack ? "本报告由 AI 基于公开资料和模型分析生成，仅供志愿规划参考，最终以考试院和高校官方信息为准" : "选择填报入口"}</p>
+            <p className="mt-0.5 truncate text-[11px] text-text-tertiary md:text-xs">{activeTrack ? "本报告由 AI 基于公开资料和模型分析生成，仅供志愿规划参考，最终以考试院和高校官方信息为准" : "选择填报入口"}</p>
           </div>
           <button onClick={() => activeTrack ? openSettings() : setGuideHistoryOpen(true)} className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-surface-border bg-surface-card text-text-secondary transition hover:border-neutral-400 hover:text-neutral-950 dark:hover:text-white" aria-label={activeTrack ? "设置" : "历史记录"}>
             {activeTrack ? <SlidersHorizontal className="h-4 w-4" /> : <History className="h-4 w-4" />}
@@ -1533,11 +1533,11 @@ export default function GaokaoVolunteerPage() {
       )}
 
       {!activeTrack ? (
-        <main className="min-h-0 flex-1 overflow-y-auto bg-surface px-6 py-8">
+        <main className="min-h-0 flex-1 overflow-y-auto bg-surface px-3 py-4 md:px-6 md:py-8">
           <section className="mx-auto flex max-w-6xl flex-col gap-8">
-            <div className="rounded-[2rem] border border-surface-border bg-surface-card/90 p-8 shadow-sm">
+            <div className="rounded-[1.5rem] border border-surface-border bg-surface-card/90 p-5 shadow-sm md:rounded-[2rem] md:p-8">
               <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-neutral-950 dark:text-white"><Sparkles className="h-3.5 w-3.5" /> Gaokao Advisor</div>
-              <h2 className="text-3xl font-semibold tracking-tight text-text-primary">先选择你的填报入口</h2>
+              <h2 className="text-2xl font-semibold tracking-tight text-text-primary md:text-3xl">先选择你的填报入口</h2>
               <p className="mt-3 max-w-3xl text-sm leading-relaxed text-text-secondary">本科、专科、补录和专升本规则不同，先选专项再进入查询工作台。当前先开放本科批次和专科批次；补录和专升本等时间/规则开放后再启用。</p>
             </div>
 
@@ -1587,8 +1587,8 @@ export default function GaokaoVolunteerPage() {
           </section>
         </main>
       ) : (
-      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-surface xl:grid-cols-[320px_minmax(420px,1fr)_400px]">
-        <aside className="min-h-0 overflow-y-auto border-r border-surface-border bg-surface-elevated/45 px-4 py-5">
+      <main className="min-h-0 flex-1 overflow-y-auto bg-surface xl:grid xl:grid-cols-[320px_minmax(420px,1fr)_400px] xl:overflow-hidden">
+        <aside className="min-h-0 border-b border-surface-border bg-surface-elevated/45 px-3 py-4 md:px-4 md:py-5 xl:overflow-y-auto xl:border-b-0 xl:border-r">
           <section className="space-y-4 rounded-3xl border border-surface-border bg-surface-card/90 p-4 shadow-sm">
             <div>
               <div className="flex items-center gap-2 text-base font-semibold text-text-primary"><GraduationCap className="h-4 w-4 text-neutral-950 dark:text-white" /> {activeTrack}专项要求</div>
@@ -1636,7 +1636,7 @@ export default function GaokaoVolunteerPage() {
           </section>
         </aside>
 
-        <section className="flex min-h-0 flex-col border-r border-surface-border bg-surface px-4 py-5">
+        <section className="flex min-h-[460px] flex-col border-b border-surface-border bg-surface px-3 py-4 md:px-4 md:py-5 xl:min-h-0 xl:border-b-0 xl:border-r">
           <div className="mb-4 rounded-3xl border border-surface-border bg-surface-card/90 p-4 shadow-sm">
             <div className="flex items-center gap-2 text-base font-semibold text-text-primary"><Bot className="h-4 w-4 text-neutral-950 dark:text-white" /> 志愿 Agent</div>
             <p className="mt-1 text-xs leading-relaxed text-text-tertiary">在这里和 Agent 沟通修改方案，右侧文档会按新条件重新生成。</p>
@@ -1666,7 +1666,7 @@ export default function GaokaoVolunteerPage() {
           </div>
         </section>
 
-        <aside className="flex min-h-0 flex-col overflow-hidden bg-[#f7f7fb] px-4 py-5 dark:bg-surface-elevated/35">
+        <aside className="flex min-h-[520px] flex-col bg-[#f7f7fb] px-3 py-4 dark:bg-surface-elevated/35 md:px-4 md:py-5 xl:min-h-0 xl:overflow-hidden">
           <div className="mb-4 rounded-[28px] border border-surface-border bg-surface-card shadow-sm">
             <div className="border-b border-surface-border px-5 py-4">
               <h2 className="text-[22px] font-semibold tracking-[-0.02em] text-text-primary">历史记录</h2>

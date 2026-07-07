@@ -320,7 +320,7 @@ export default function MobileNav() {
 
       {menuOpen && <div className="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" />}
 
-      <div ref={drawerRef} className={cn("md:hidden fixed top-0 left-0 z-50 h-full w-[300px] bg-surface border-r border-surface-border shadow-2xl transition-transform duration-300 ease-out flex flex-col", menuOpen ? "translate-x-0" : "-translate-x-full")}>
+      <div ref={drawerRef} className={cn("md:hidden fixed top-0 left-0 z-50 h-full w-[min(320px,calc(100vw-32px))] bg-surface border-r border-surface-border shadow-2xl transition-transform duration-300 ease-out flex flex-col", menuOpen ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex items-center justify-between h-12 px-3 border-b border-surface-border shrink-0">
           <Link href="/" className="flex items-center gap-2" onClick={() => setMenuOpen(false)}>
             <img src={theme === "dark" ? "/brand-dark-logo.png" : "/brand-light-logo.png"} alt="AI Space" className="w-7 h-7 rounded-lg object-cover" />
