@@ -214,8 +214,12 @@ npm run test:chat-compare-model-selection
 npm run test:chat-placeholder-jitter-live
 npm run test:chat-old-row-stability-live
 npm run test:chat-rich-markdown-stability-live
+npm run test:chat-old-row-rich-stability-live
 npm run test:chat-markdown-token-fixture
 npm run test:chat-markdown-coverage-fixture
+npm run test:chat-markdown-code-fixture
+npm run test:chat-compare-column-scroll-fixture
+npm run test:chat-message-overview-fixture
 ```
 
 额外 DOM 验证：

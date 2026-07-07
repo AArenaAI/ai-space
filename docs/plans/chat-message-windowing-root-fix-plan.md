@@ -644,6 +644,24 @@ message-row / message-list / markdown render profile events
 post-prepend long tasks
 ```
 
+2026-07-07 复测结果：指定会话 `62 / 12 / 116 / 608 / 264 / 607 / 606` 均已通过 `profile:chat-history-real`。复测时使用本地前端 + testnet API：
+
+```bash
+AI_SPACE_E2E_EMAIL="$TESTNET_EMAIL" \
+AI_SPACE_E2E_PASSWORD="$TESTNET_PASSWORD" \
+REAL_CHAT_API_BASE_URL=http://127.0.0.1:3000 \
+REAL_CHAT_FRONTEND_BASE_URL=http://127.0.0.1:3000 \
+AI_SPACE_E2E_CONVERSATION_ID=<62|12|116|608|264|607|606> \
+AI_SPACE_HISTORY_PROFILE_REQUIRE_PREPEND=0 \
+npm run profile:chat-history-real
+```
+
+注意 profile 脚本的 anchor 口径：
+
+- 只有发生本地窗口释放或远端 older page prepend 时，才断言 prepend anchor drift；滚到顶部但没有 prepend 不能按 prepend 失败处理。
+- 快速 older page 返回时，Playwright 采样的“上一帧可见行”可能不是产品真实捕获的 load-more anchor；应优先使用产品侧 profile event：`message-list-load-more-anchor-capture` / `message-list-load-more-anchor-restore`。
+- 若产品事件显示捕获行回到捕获 top（`productAnchorDelta <= maxAnchorDeltaPx`），脚本旧 anchor 的 drift 只能作为诊断字段，不应判为产品回归。
+
 真实 12 曾暴露一个重要问题：页面已到 `scrollTop=0`、仍有 `hiddenLocalMessageCount`，但 Virtuoso `startReached` 没触发本地 +8；当前修复是在 `onWheel(deltaY<0 && scrollTop<=4)` 和 `onScroll(scrollTop<=4)` 中复用同一个本地窗口释放 helper，作为 `startReached` 的兜底。
 
 ## 11. 结论

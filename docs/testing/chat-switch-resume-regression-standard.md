@@ -629,12 +629,19 @@ cd frontend
 node scripts/regression/chat-background-polling-runtime-hook-regression.cjs
 node scripts/regression/chat-bootstrap-task-resume-regression.cjs
 node scripts/regression/chat-task-stream-runtime-hook-regression.cjs
-node scripts/regression/chat-activity-timeline-regression.cjs
+node scripts/regression/chat-activity-polling-static.cjs
+npm run test:chat-streaming-state-fixture
+npm run test:chat-activity-entry-states-fixture
+npm run test:chat-page-state-live
+npm run test:chat-bootstrap-304-live
 TESTNET_EMAIL=... TESTNET_PASSWORD=*** TESTNET_BASE_URL=https://testnet.ai-space.xyz node scripts/regression/chat-active-task-interrupt-resume-live.cjs
 TESTNET_EMAIL=... TESTNET_PASSWORD=*** TESTNET_BASE_URL=https://testnet.ai-space.xyz node scripts/regression/chat-quick-switch-live.cjs
 TESTNET_EMAIL=... TESTNET_PASSWORD=*** TESTNET_BASE_URL=https://testnet.ai-space.xyz node scripts/regression/chat-activity-panel-switch-live.cjs
+npm run test:chat-block-anchor-restore-live
 npm run build
 ```
+
+> 2026-07-07 复测补充：当前仓库没有 `test:chat-activity-panel-switch-live` npm script，但有脚本文件，按 `node scripts/regression/chat-activity-panel-switch-live.cjs` 执行。`chat-activity-panel-switch-live.cjs` 需要识别当前 Activity 面板标题「模型思考」；否则会把已恢复的 reasoning 误计为 0。`chat-bootstrap-304-live` 需要指定当前账号存在的 `TESTNET_CONVERSATION_ID`，不要使用已 404 的历史默认会话。
 
 ## 建议保留的临时/专项复测脚本模式
 
