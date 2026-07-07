@@ -202,7 +202,22 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
       setAutoModelNotice(false);
     }
     setSelectedModel(model);
-  }, [effectiveSkillKey, recommendedModel, setSelectedModel]);
+
+    // Existing normal Chat conversations restore selectedModel from the
+    // conversation.model field. Persist explicit user selections so reloads and
+    // the next send do not snap back to the conversation's original model.
+    const targetConversationId = conversationId || currentConversation;
+    if (targetConversationId && !isCompare) {
+      void apiFetch(`/conversations/${targetConversationId}`, {
+        method: "PUT",
+        body: JSON.stringify({ model: model.id }),
+      }).then((response) => {
+        if (response.ok) {
+          window.dispatchEvent(new CustomEvent("conversation-updated", { detail: { conversationId: targetConversationId } }));
+        }
+      }).catch(() => {});
+    }
+  }, [conversationId, currentConversation, effectiveSkillKey, isCompare, recommendedModel, setSelectedModel]);
 
   // Skill 自动选择推荐模型（允许用户覆盖）
   // 只在空对话/未生成时自动切。生成中切模型会让用户误以为当前流被切到推荐模型，

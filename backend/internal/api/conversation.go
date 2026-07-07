@@ -433,6 +433,7 @@ func (h *ConversationHandler) Update(c *gin.Context) {
 
 	var req struct {
 		Title         string  `json:"title"`
+		Model         string  `json:"model,omitempty"`
 		Pinned        *bool   `json:"pinned,omitempty"`
 		Compare       *bool   `json:"compare,omitempty"`
 		CompareModels *string `json:"compare_models,omitempty"`
@@ -452,6 +453,9 @@ func (h *ConversationHandler) Update(c *gin.Context) {
 	updates := map[string]interface{}{}
 	if req.Title != "" {
 		updates["title"] = req.Title
+	}
+	if strings.TrimSpace(req.Model) != "" {
+		updates["model"] = strings.TrimSpace(req.Model)
 	}
 	if req.Pinned != nil {
 		updates["pinned"] = *req.Pinned

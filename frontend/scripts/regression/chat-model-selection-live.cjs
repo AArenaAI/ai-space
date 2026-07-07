@@ -1,122 +1,167 @@
 #!/usr/bin/env node
-const { chromium } = require('playwright');
-const { env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const apiBaseUrl = trim(env('MODEL_SELECTION_API_BASE_URL', env('REAL_CHAT_API_BASE_URL', env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz'))));
+const frontendBaseUrl = trim(env('MODEL_SELECTION_FRONTEND_BASE_URL', env('REAL_CHAT_FRONTEND_BASE_URL', apiBaseUrl)));
+const normalTarget = env('MODEL_SELECTION_NORMAL_TARGET', 'deepseek-v4-flash');
+const normalTargetName = env('MODEL_SELECTION_NORMAL_TARGET_NAME', 'DeepSeek-V4 Flash');
+const compareTargets = env('MODEL_SELECTION_COMPARE_TARGETS', 'deepseek-v4-pro,deepseek-v4-flash').split(',').map((item) => item.trim()).filter(Boolean).slice(0, 2);
+const timeoutMs = Number(env('MODEL_SELECTION_TIMEOUT_MS', '90000'));
+
+function trim(value) { return String(value || '').replace(/\/+$/, ''); }
+function redact(value) {
+  return String(value || '')
+    .replace(/Bearer\s+[-._~+/=A-Za-z0-9]+/g, 'Bearer [REDACTED]')
+    .replace(/eyJ[A-Za-z0-9._-]+/g, '[REDACTED]')
+    .replace(/(password|token|secret)(["'=:\s]+)([^"'\s,}]+)/gi, '$1$2[REDACTED]');
 }
-
-async function clickModelSelectorOption(page, trigger, targetName) {
-  await trigger.click({ timeout: 5000 });
-  const pattern = new RegExp(escapeRegExp(targetName).replace(/\\s+/g, '\\s*'), 'i');
-  const option = page.locator('button, [role="option"], [role="menuitem"], li, div').filter({ hasText: pattern }).last();
-  try {
-    await option.waitFor({ state: 'visible', timeout: 10000 });
-  } catch (error) {
-    const visibleCandidates = await page.locator('button, [role="option"], [role="menuitem"], li, div')
-      .evaluateAll((nodes) => nodes
-        .map((node) => (node.textContent || '').replace(/\s+/g, ' ').trim())
-        .filter(Boolean)
-        .filter((text, index, arr) => arr.indexOf(text) === index)
-        .slice(0, 80));
-    throw new Error(`model option not found: ${targetName}; candidates=${JSON.stringify(visibleCandidates)}`);
-  }
-  await option.click({ timeout: 5000 });
-  await page.waitForTimeout(500);
-}
-
-async function clickDeepSeekModelOption(page, trigger, targetName) {
-  await trigger.click({ timeout: 5000 });
-  await page.locator('div').filter({ hasText: /^DeepSeek\s*2$/i }).last().click({ timeout: 5000 });
-  const pattern = new RegExp(escapeRegExp(targetName).replace(/\\s+/g, '\\s*'), 'i');
-  const option = page.locator('button').filter({ hasText: pattern }).last();
-  await option.waitFor({ state: 'visible', timeout: 10000 });
-  await option.click({ timeout: 5000 });
-  await page.waitForTimeout(500);
-}
-
-async function waitForRequestBody(page, predicate, timeout = 30000) {
-  return page.waitForRequest((req) => {
-    if (req.method() !== 'POST') return false;
-    if (!predicate(req.url())) return false;
-    return true;
-  }, { timeout }).then((req) => {
-    const body = req.postData() || '{}';
-    try { return JSON.parse(body); } catch { return { raw: body }; }
+async function apiJson(path, token, init = {}) {
+  const res = await fetch(`${apiBaseUrl}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
   });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} ${res.status}: ${redact(text.slice(0, 500))}`);
+  return data;
+}
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+async function selectModel(page, trigger, modelId) {
+  await trigger.click({ timeout: 10000 });
+  const provider = modelId.startsWith('deepseek') ? 'deepseek'
+    : modelId.startsWith('gpt') ? 'openai'
+    : modelId.startsWith('gemini') ? 'google'
+    : modelId.startsWith('kimi') ? 'moonshot'
+    : '';
+  if (provider) {
+    const providerNode = page.locator(`[data-testid="model-selector-provider-${provider}"]`).last();
+    if (await providerNode.isVisible().catch(() => false)) await providerNode.hover();
+  }
+  const option = page.locator(`[data-testid="model-selector-option-${modelId}"]`).last();
+  await option.waitFor({ state: 'visible', timeout: 15000 });
+  await option.click({ timeout: 10000 });
+  await page.waitForTimeout(700);
+}
+async function waitForPostBody(page, urlPattern, timeout = 30000) {
+  const req = await page.waitForRequest((request) => request.method() === 'POST' && urlPattern.test(request.url()), { timeout });
+  const body = req.postData() || '{}';
+  try { return JSON.parse(body); } catch { return { raw: body }; }
+}
+async function waitForUiAnswer(page, needle) {
+  await page.waitForFunction((text) => document.body.innerText.includes(text), needle, { timeout: timeoutMs });
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="chat-stop-button"]').length === 0 && document.querySelectorAll('[data-chat-pending-shell="true"]').length === 0, undefined, { timeout: timeoutMs }).catch(() => {});
 }
 
 (async () => {
-  const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
-  const auth = await login({ baseUrl });
-  const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  const consoleEvents = [];
-  const pageErrors = [];
-  page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
-  page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(user));
-    localStorage.setItem('selected-model', 'deepseek-v4-pro');
-    localStorage.removeItem('compare-mode');
-    localStorage.removeItem('compare-models');
-  }, { token: auth.token, user: auth.user });
+  const startedAt = Date.now();
+  const result = { apiBaseUrl, frontendBaseUrl, normalTarget, normalTargetName, compareTargets, startedAt };
+  let browser;
+  let auth;
+  const cleanupIds = [];
+  try {
+    assert(compareTargets.length === 2, 'Need exactly two compare target models');
+    auth = await login({ baseUrl: apiBaseUrl });
+    const opened = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
+    browser = opened.browser;
+    const page = opened.page;
+    const consoleEvents = [];
+    const pageErrors = [];
+    const requestFailed = [];
+    page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
+    page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
+    page.on('requestfailed', (request) => requestFailed.push({ method: request.method(), url: request.url(), failure: request.failure()?.errorText || '' }));
 
-  await page.goto(`${baseUrl}/chat?model_selection_live=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(1200);
+    const normalConv = await apiJson('/api/conversations', auth.token, { method: 'POST', body: JSON.stringify({ title: `model normal live ${startedAt}`, model: 'gpt-5.4-mini' }) });
+    cleanupIds.push(normalConv.id);
+    await page.addInitScript(({ selected }) => {
+      localStorage.setItem('selected-model', selected);
+      localStorage.setItem('recent-models', JSON.stringify([selected]));
+      localStorage.removeItem('compare-mode');
+      localStorage.removeItem('compare-models');
+      localStorage.setItem('search-enabled', 'false');
+      localStorage.setItem('reasoning-enabled', 'false');
+      localStorage.setItem('reasoning-mode', 'fast');
+    }, { selected: 'gpt-5.4-mini' });
 
-  const normalTrigger = page.locator('header button').filter({ hasText: /DeepSeek|GPT|Kimi|Gemini|Claude/i }).first();
-  await clickDeepSeekModelOption(page, normalTrigger, 'DeepSeek-V4 Flash');
-  const normalHeaderText = (await page.locator('header').innerText().catch(() => '')).replace(/\s+/g, ' ');
-  const normalBodyPromise = waitForRequestBody(page, (url) => url.endsWith('/api/chat') || url.includes('/api/chat'));
-  await page.locator('textarea').last().fill(`模型选择普通模式 live ${Date.now()}，只回答 OK`);
-  await page.locator('textarea').last().press('Enter');
-  const normalBody = await normalBodyPromise;
-  await page.waitForTimeout(1000);
-  const normalHeaderAfterSend = (await page.locator('header').innerText().catch(() => '')).replace(/\s+/g, ' ');
+    await page.goto(`${frontendBaseUrl}/chat/?id=${normalConv.id}&model_selection_live=${startedAt}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await page.waitForSelector('[data-testid="model-selector-trigger"]', { timeout: 30000 });
+    await selectModel(page, page.locator('header [data-testid="model-selector-trigger"]').first(), normalTarget);
+    const normalBeforeReload = await page.evaluate(() => ({ selected: localStorage.getItem('selected-model'), recent: localStorage.getItem('recent-models') }));
+    let normalPersistedModel = '';
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const conversationData = await apiJson(`/api/conversations/${normalConv.id}?message_tail=2`, auth.token);
+      normalPersistedModel = conversationData.model || conversationData.conversation?.model || '';
+      if (normalPersistedModel === normalTarget) break;
+      await page.waitForTimeout(400);
+    }
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    const normalTriggerAfterReload = page.locator('header [data-testid="model-selector-trigger"]').first();
+    await normalTriggerAfterReload.waitFor({ state: 'visible', timeout: 30000 });
+    const normalReloadModelId = await normalTriggerAfterReload.getAttribute('data-model-id');
+    const normalPromptToken = `MODEL_NORMAL_OK_${startedAt}`;
+    const normalBodyPromise = waitForPostBody(page, /\/api\/chat\/init\b/);
+    await page.locator('textarea').last().fill(`模型选择普通 live：请只回答 ${normalPromptToken}`);
+    await page.locator('button[type="submit"]:not([disabled])').last().click({ force: true });
+    const normalBody = await normalBodyPromise;
+    await waitForUiAnswer(page, normalPromptToken).catch(() => {});
+    result.normal = { beforeReload: normalBeforeReload, persistedModel: normalPersistedModel, reloadModelId: normalReloadModelId, requestModel: normalBody.model };
 
-  await page.goto(`${baseUrl}/chat?model_selection_compare_live=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(800);
-  const compareToggle = page.locator('button[aria-label="Compare Mode"], button[title="Compare Mode"]').last();
-  await compareToggle.click({ timeout: 5000 }).catch(async () => {
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+C' : 'Control+Shift+C').catch(() => {});
-  });
-  await page.locator('text=下一轮模型').first().waitFor({ state: 'visible', timeout: 10000 });
-  const compareHeader = page.locator('main').locator('xpath=.//div[contains(@class,"border-b")][.//*[contains(text(),"下一轮模型")]][1]').first();
-  const compareModelTriggers = compareHeader.locator('button').filter({ hasText: /DeepSeek|GPT|Kimi|Gemini|Claude/i });
-  await clickDeepSeekModelOption(page, compareModelTriggers.nth(0), 'DeepSeek-V4 Pro');
-  await clickDeepSeekModelOption(page, compareModelTriggers.nth(1), 'DeepSeek-V4 Flash');
-  const compareHeaderText = (await compareHeader.innerText().catch(() => '')).replace(/\s+/g, ' ');
-  const compareBodyPromise = waitForRequestBody(page, (url) => url.includes('/api/chat/compare/init') || url.includes('/api/chat/init'));
-  await page.locator('textarea').last().fill(`模型选择对比模式 live ${Date.now()}，只回答 OK`);
-  await page.locator('textarea').last().press('Enter');
-  const compareBody = await compareBodyPromise;
-  await browser.close();
+    const compareConv = await apiJson('/api/conversations', auth.token, { method: 'POST', body: JSON.stringify({ title: `model compare live ${startedAt}`, model: 'gpt-5.4-mini' }) });
+    cleanupIds.push(compareConv.id);
+    await page.goto(`${frontendBaseUrl}/chat/?id=${compareConv.id}&model_selection_compare_live=${startedAt}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await page.locator('[data-testid="chat-compare-toggle"]').last().click({ timeout: 10000 });
+    const compareHeader = page.locator('[data-testid="chat-compare-header"]').first();
+    await compareHeader.waitFor({ state: 'visible', timeout: 15000 });
+    const compareTriggers = compareHeader.locator('[data-testid="model-selector-trigger"]');
+    await selectModel(page, compareTriggers.nth(0), compareTargets[0]);
+    await selectModel(page, compareTriggers.nth(1), compareTargets[1]);
+    await page.waitForTimeout(1200);
+    const compareHeaderIds = await compareHeader.locator('[data-testid="model-selector-trigger"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-model-id')));
+    const compareStorage = await page.evaluate(() => ({ mode: localStorage.getItem('compare-mode'), models: localStorage.getItem('compare-models') }));
+    const comparePersisted = await apiJson(`/api/conversations/${compareConv.id}?message_tail=2`, auth.token).then((data) => data.compare_models || data.conversation?.compare_models || '').catch((error) => `ERROR: ${error.message}`);
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    const reloadedHeader = page.locator('[data-testid="chat-compare-header"]').first();
+    await reloadedHeader.waitFor({ state: 'visible', timeout: 30000 });
+    const compareReloadIds = await reloadedHeader.locator('[data-testid="model-selector-trigger"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-model-id')));
+    const comparePromptToken = `MODEL_COMPARE_OK_${startedAt}`;
+    const compareBodyPromise = waitForPostBody(page, /\/api\/chat\/compare\/init\b/);
+    await page.locator('textarea').last().fill(`模型选择对比 live：请只回答 ${comparePromptToken}`);
+    await page.locator('button[type="submit"]:not([disabled])').last().click({ force: true });
+    const compareBody = await compareBodyPromise;
+    result.compare = { headerIds: compareHeaderIds, storage: compareStorage, persistedRaw: comparePersisted, reloadIds: compareReloadIds, requestModels: compareBody.compare_models, requestModel: compareBody.model };
 
-  const normalModel = normalBody.model || normalBody?.body?.model;
-  const compareModels = compareBody.compare_models || compareBody.group_models || [];
-  const result = {
-    normalHeaderText,
-    normalHeaderAfterSend,
-    normalBodyModel: normalModel,
-    compareHeaderText,
-    compareBodyModels: compareModels,
-    compareBodyModel: compareBody.model,
-    pageErrors,
-    consoleErrors: summarizeConsole(consoleEvents),
-  };
-  result.ok = normalModel === 'deepseek-v4-flash'
-    && /V4 Pro/i.test(compareHeaderText)
-    && /V4 Flash/i.test(compareHeaderText)
-    && compareModels.includes('deepseek-v4-pro')
-    && compareModels.includes('deepseek-v4-flash')
-    && pageErrors.length === 0;
+    const consoleErrors = summarizeConsole(consoleEvents).filter((event) => event.type === 'error' && !/401|favicon|Failed to load resource/.test(event.text));
+    result.consoleErrors = consoleErrors;
+    result.pageErrors = pageErrors;
+    result.requestFailed = requestFailed.filter((item) => !/analytics|favicon|_rsc=/.test(item.url));
+    const persistedParsed = typeof comparePersisted === 'string' ? (() => { try { return JSON.parse(comparePersisted); } catch { return []; } })() : comparePersisted;
+    result.ok = normalBeforeReload.selected === normalTarget
+      && normalPersistedModel === normalTarget
+      && normalReloadModelId === normalTarget
+      && normalBody.model === normalTarget
+      && compareTargets.every((id) => compareHeaderIds.includes(id))
+      && compareTargets.every((id) => compareReloadIds.includes(id))
+      && compareTargets.every((id) => Array.isArray(persistedParsed) && persistedParsed.includes(id))
+      && compareTargets.every((id) => Array.isArray(compareBody.compare_models) && compareBody.compare_models.includes(id))
+      && pageErrors.length === 0
+      && consoleErrors.length === 0;
+    assert(result.ok, `model selection live failed: ${JSON.stringify(result, null, 2)}`);
+  } finally {
+    await browser?.close().catch(() => {});
+    if (auth?.token && cleanupIds.length) {
+      result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: cleanupIds }).catch((error) => ({ error: error.message }));
+    }
+  }
   printResult(result);
-  if (!result.ok) process.exit(2);
+  console.log('chat model selection live passed');
 })().catch((error) => {
-  console.error(error.stack || error);
+  console.error(redact(error.stack || error.message || error));
   process.exit(1);
 });

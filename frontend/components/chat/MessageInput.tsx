@@ -660,6 +660,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               aria-pressed={compareMode}
               aria-label={t("chat.compareMode")}
               title={t("chat.compareMode")}
+              data-testid="chat-compare-toggle"
               className={cn(
                 "flex h-7 w-7 items-center justify-center rounded-lg transition-colors duration-200",
                 compareMode

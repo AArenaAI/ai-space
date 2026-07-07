@@ -343,6 +343,8 @@ export default function ModelSelector({
         key={model.id}
         onClick={() => handleSelect(model)}
         disabled={!available}
+        data-testid={`model-selector-option-${model.id}`}
+        data-model-id={model.id}
         className={cn(
           "flex items-start gap-3.5 w-full px-4 py-3.5 rounded-xl text-left transition-colors duration-150 group",
           !available && "cursor-not-allowed opacity-55",
@@ -412,6 +414,8 @@ export default function ModelSelector({
           updateDropdownPosition();
           setOpen((v) => !v);
         }}
+        data-testid="model-selector-trigger"
+        data-model-id={selected.id}
         className={cn(
           "flex items-center gap-2.5 px-2.5 py-1.5 text-[15px] font-medium transition-all duration-200 w-full",
           "rounded-lg",
@@ -514,6 +518,8 @@ export default function ModelSelector({
                     key={group.provider}
                     onMouseEnter={() => handleProviderEnter(group.provider)}
                     onMouseLeave={handleProviderLeave}
+                    data-testid={`model-selector-provider-${group.provider.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                    data-provider={group.provider}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors",
                       hoveredProvider === group.provider
