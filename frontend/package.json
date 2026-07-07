@@ -87,6 +87,7 @@
     "test:chat-real-e2e-matrix": "node scripts/regression/chat-real-e2e-matrix.cjs",
     "test:chat-real-e2e-extra": "node scripts/regression/chat-real-e2e-extra.cjs",
     "test:chat-real-live-send-e2e": "node scripts/regression/chat-real-live-send-e2e.cjs",
+    "test:chat-user-message-edit-live": "node scripts/regression/chat-user-message-edit-live.cjs",
     "test:chat-bootstrap-304-live": "node scripts/regression/chat-bootstrap-304-live.cjs",
     "test:chat-page-state-live": "node scripts/regression/chat-page-state-live.cjs",
     "test:chat-quick-switch-live": "node scripts/regression/chat-quick-switch-live.cjs",

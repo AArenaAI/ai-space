@@ -740,6 +740,7 @@ npx tsc --noEmit --pretty false
 npm run test:chat-request-builder
 npm run test:chat-single-send-coordinator
 CHAT_USER_CONTENT_FIXTURE_BASE_URL=http://127.0.0.1:3000 npm run test:chat-user-content-fixture
+USER_EDIT_API_BASE_URL=http://127.0.0.1:19091 USER_EDIT_FRONTEND_BASE_URL=http://127.0.0.1:3000 USER_EDIT_MODEL=gpt-5.4-mini npm run test:chat-user-message-edit-live
 npm run build
 ```
 
@@ -749,6 +750,7 @@ npm run build
 - frontend typecheck ✅
 - request builder / single-send coordinator ✅
 - user-content fixture：文件 chip、引用、长用户消息折叠、长代码块、编辑入口与编辑框 ✅
+- user-message-edit live：本地前端 + 本地后端新代码 + 真实测试账号 + 真实模型 `gpt-5.4-mini`；覆盖发送、编辑、PATCH 200、截断旧分支、重新生成、bootstrap 持久化、刷新恢复、无重复 user/assistant row ✅
 - production build ✅
 
 **后续优化项:**
@@ -757,7 +759,7 @@ npm run build
 2. 附件编辑：需要支持 message_files 替换、file context 重新入库、RAG 上下文重算和 UI 上的附件增删。
 3. 生成中编辑：当前禁止；若要支持，应先 Stop/cancel 当前 task，再走编辑重跑，避免旧 stream 写回被删 assistant。
 4. 历史编辑确认体验：目前编辑框内提示“保存后将重新生成这条消息之后的回答”；若误触反馈多，再加轻量 confirm。
-5. Live 覆盖：补真实登录流 `send -> edit first user -> save -> no duplicated user row -> restored history only has edited branch`。
+5. Live 覆盖扩展：当前已覆盖单轮真实闭环；后续可补多轮历史中编辑第一条 / 中间条、长回答截断、以及失败恢复。
 
 ---
 
