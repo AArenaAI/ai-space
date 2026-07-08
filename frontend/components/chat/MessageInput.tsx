@@ -589,7 +589,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
   return (
     <div className="shrink-0 px-4 pb-6 pt-6">
-      <form onSubmit={handleSubmit} className={CHAT_COMPOSER_SHELL_CLASS}>
+      <form onSubmit={handleSubmit} className={CHAT_COMPOSER_SHELL_CLASS} data-testid="chat-message-input-form">
         <NetworkStatusHint
           isOffline={isOffline}
           justRestored={justRestored}
@@ -901,6 +901,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
 
           <textarea
             ref={textareaRef}
+            data-testid="chat-message-input"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -1045,6 +1046,7 @@ export default function MessageInput({ onSend, onStop, isLoading, compareMode, o
               ) : (
                 <button
                   type="submit"
+                  data-testid="chat-send-button"
                   disabled={!canSubmit}
                   title={isOffline ? t("messageInput.network.offlineShort") : hasParsingFiles ? t("chat.fileParsingWaitShort") : t("chat.send")}
                   className={cn(

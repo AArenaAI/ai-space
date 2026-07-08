@@ -94,8 +94,13 @@ function failResponse(body = { error: "boom", message: "失败" }) { return { ok
     assert.deepEqual(plan.userMessage.files, [{ public_id: "pub", type: "file", filename: "f.txt" }]);
     assert.equal(plan.assistantMessage.role, "assistant");
     assert.equal(plan.assistantMessage.searchStatus, "searching");
-    assert.deepEqual(plan.contextMessages.map((m) => m.id), ["old", "id-1"]);
-    assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["old", "id-1", "id-2"]);
+    assert.equal(plan.userMessage.clientMessageId, plan.userMessage.id);
+    assert.equal(plan.assistantMessage.clientMessageId, plan.assistantMessage.id);
+    assert.equal(plan.userMessage.localRunId, plan.assistantMessage.localRunId);
+    assert.equal(plan.userMessage.sendStatus, "submitting");
+    assert.equal(plan.assistantMessage.generationStatus, "pending");
+    assert.deepEqual(plan.contextMessages.map((m) => m.id), ["old", "id-2"]);
+    assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["old", "id-2", "id-3"]);
   });
 
   await test("prepareSingleSendMessages builds regenerate plan from last user", () => {
@@ -110,7 +115,10 @@ function failResponse(body = { error: "boom", message: "失败" }) { return { ok
     assert.equal(plan.mode, "regenerate");
     assert.equal(plan.lastUserIndex, 2);
     assert.deepEqual(plan.contextMessages.map((m) => m.id), ["u1", "a1", "u2"]);
-    assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["u1", "a1", "u2", "id-1"]);
+    assert.equal(plan.assistantMessage.clientMessageId, plan.assistantMessage.id);
+    assert.equal(plan.assistantMessage.localRunId, "id-1");
+    assert.equal(plan.assistantMessage.generationStatus, "pending");
+    assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["u1", "a1", "u2", "id-2"]);
   });
 
   await test("prepareSingleSendMessages returns undefined for regenerate without user", () => {
@@ -127,7 +135,9 @@ function failResponse(body = { error: "boom", message: "失败" }) { return { ok
     assert.equal(plan.contextMessages[1].id, "");
     assert.equal(plan.contextMessages[1].content, "hidden");
     assert.deepEqual(plan.contextMessages[1].files, [{ public_id: "p", type: "image", filename: "x" }]);
-    assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["u1", "id-1"]);
+    assert.equal(plan.assistantMessage.clientMessageId, plan.assistantMessage.id);
+    assert.equal(plan.assistantMessage.localRunId, "id-1");
+    assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["u1", "id-2"]);
   });
 
   await test("runSingleChatInit posts init body and maps server assistant", async () => {

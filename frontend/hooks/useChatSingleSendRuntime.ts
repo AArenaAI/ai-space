@@ -27,6 +27,7 @@ import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { CreateConversationAction } from "@/hooks/useChatConversationCreateRuntime";
 import { readAuthState } from "@/lib/auth/state";
 import { chatRuntimeStore } from "@/lib/chatRuntime";
+import { bindServerMessage, sameChatMessage } from "@/lib/chatMessageIdentity";
 
 type AbortReason = "user" | "navigation" | null;
 type SendReasoning = { enabled: boolean; effort?: string };
@@ -110,10 +111,10 @@ export function useChatSingleSendRuntime({
     if (!plan) return previous;
     if (plan.mode === "regenerate") {
       const lastUserIndex = plan.lastUserIndex ?? -1;
-      return previous.filter((message, index) => index <= lastUserIndex || message.role !== "assistant");
+      return [...previous.filter((message, index) => index <= lastUserIndex || message.role !== "assistant"), plan.assistantMessage];
     }
-    if (plan.mode === "skip-user") return previous;
-    return [...previous, plan.userMessage!];
+    if (plan.mode === "skip-user") return [...previous, plan.assistantMessage];
+    return [...previous, plan.userMessage!, plan.assistantMessage];
   }, []);
 
   const sendMessage = useCallback(
@@ -202,6 +203,10 @@ export function useChatSingleSendRuntime({
       abortControllerRef.current = controller;
       let activeAssistantId = localAssistantMsg.id;
       let hasInsertedServerAssistant = false;
+      if (pendingLocalAssistantsRef && convId) {
+        pendingLocalAssistantsRef.current[localAssistantMsg.id] = { convId, message: localAssistantMsg };
+        syncSingleSendMessagesToRuntime(convId, lastRuntimeMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
+      }
 
       const completion = (async () => {
       try {
@@ -224,11 +229,8 @@ export function useChatSingleSendRuntime({
           fallbackId: () => localAssistantMsg.id,
         });
         convId = initResult.conversation_id || convId;
-        const serverAssistantId = String(initResult.assistant_message_id || initResult.mappedAssistantMessage.id || localAssistantMsg.id);
-        const serverAssistant = {
-          ...localAssistantMsg,
+        const serverAssistant = bindServerMessage(localAssistantMsg, {
           ...initResult.mappedAssistantMessage,
-          id: serverAssistantId,
           serverMessageId: initResult.assistant_message_id || initResult.mappedAssistantMessage.serverMessageId,
           generationTaskId: initResult.task_id || initResult.mappedAssistantMessage.generationTaskId,
           createdAt: initResult.mappedAssistantMessage.createdAt || localAssistantMsg.createdAt,
@@ -236,24 +238,27 @@ export function useChatSingleSendRuntime({
           searchStatus: search ? "searching" : initResult.mappedAssistantMessage.searchStatus,
           activityStatus: createBusyGeneratingStatus(translate),
           generationStartedAt: initResult.mappedAssistantMessage.createdAt || localAssistantMsg.createdAt || now(),
-        } as Message;
+          generationStatus: "pending",
+        }) as Message;
         activeAssistantId = serverAssistant.id;
         initializeAssistantRealtime(serverAssistant.id, serverAssistant.generationStartedAt || serverAssistant.createdAt || now());
         setMessages((prev) => {
-          const patchedUsers = prev.map((message) => {
-            if (initResult.user_message_id && message.id === messagePlan.userMessage?.id) {
-              return { ...message, id: String(initResult.user_message_id), serverMessageId: initResult.user_message_id } as Message;
+          let assistantPatched = false;
+          const patched = prev.map((message) => {
+            if (initResult.user_message_id && messagePlan.userMessage && sameChatMessage(message, messagePlan.userMessage)) {
+              return { ...message, serverMessageId: initResult.user_message_id, sendStatus: "server_bound" } as Message;
+            }
+            if (sameChatMessage(message, localAssistantMsg)) {
+              assistantPatched = true;
+              return bindServerMessage(message as Message, serverAssistant) as Message;
+            }
+            if (serverAssistant.serverMessageId && message.role === "assistant" && message.serverMessageId === serverAssistant.serverMessageId) {
+              assistantPatched = true;
+              return bindServerMessage(localAssistantMsg, { ...message, ...serverAssistant }) as Message;
             }
             return message;
           });
-          const withoutDuplicateAssistant = patchedUsers.filter((message) =>
-            !(message.role === "assistant" && (
-              message.id === serverAssistant.id ||
-              (serverAssistant.serverMessageId && message.serverMessageId === serverAssistant.serverMessageId) ||
-              (serverAssistant.generationTaskId && message.generationTaskId === serverAssistant.generationTaskId)
-            ))
-          );
-          const next = [...withoutDuplicateAssistant, serverAssistant];
+          const next = assistantPatched ? patched : [...patched, serverAssistant];
           lastRuntimeMessages = next;
           syncSingleSendMessagesToRuntime(convId, next, [serverAssistant]);
           return next;
@@ -284,11 +289,26 @@ export function useChatSingleSendRuntime({
         });
         if (decision.type !== "none") {
           setMessages((prev) => {
-            const next = prev.some((message) => message?.id === activeAssistantId)
-              ? patchMessageById(prev, activeAssistantId, decision.patch)
+            const userSendStatus = !hasInsertedServerAssistant
+              ? decision.type === "stopped" ? "cancelled" : "failed"
+              : undefined;
+            const withUserState = userSendStatus && messagePlan.userMessage
+              ? prev.map((message) => sameChatMessage(message, messagePlan.userMessage!)
+                ? {
+                    ...message,
+                    sendStatus: userSendStatus,
+                    errorCode: decision.type === "display_error" ? decision.patch.errorCode : message.errorCode,
+                  } as Message
+                : message)
+              : prev;
+            const next = withUserState.some((message) => message?.id === activeAssistantId)
+              ? patchMessageById(withUserState, activeAssistantId, {
+                  ...decision.patch,
+                  generationStatus: decision.type === "stopped" ? "cancelled" : "failed",
+                })
               : hasInsertedServerAssistant
-                ? prev
-                : [...prev, { ...localAssistantMsg, ...decision.patch } as Message];
+                ? withUserState
+                : [...withUserState, { ...localAssistantMsg, ...decision.patch, generationStatus: decision.type === "stopped" ? "cancelled" : "failed" } as Message];
             syncSingleSendMessagesToRuntime(convId, next, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
             return next;
           });

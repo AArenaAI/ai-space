@@ -18,6 +18,7 @@ import { AssistantMessageContent } from "./AssistantMessageContent";
 import { ModelAvatar } from "./ModelAvatar";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 import { resolveAssistantGenerationState, shouldSubscribeAssistantRealtime } from "@/lib/chatGenerationState";
+import { getMessageRenderKey } from "@/lib/chatMessageIdentity";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
 
@@ -74,6 +75,7 @@ export type MessageRowProps = {
   isFavorited: (serverMessageId: number) => boolean;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
+  onRetryUserMessage?: (message: Message) => void;
   onEditUserMessage?: (message: Message, content: string) => Promise<void>;
   canEditUserMessages?: boolean;
   onForkCompare?: (messageId: number) => void;
@@ -115,6 +117,7 @@ function MessageRow({
   isFavorited,
   onRegenerate,
   onContinueGenerate,
+  onRetryUserMessage,
   onEditUserMessage,
   canEditUserMessages,
   onForkCompare,
@@ -164,7 +167,8 @@ function MessageRow({
   const isAssistantFailure = !isUser && isAssistantFailureState(assistantFailureMessage);
   const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
   const canRegenerate = !isUser && !isAssistantFailure && !msg.stopped && (isLast || !msg.content) && assistantGenerationState.canShowActions;
-  const canEditUserMessage = isUser && Boolean(canEditUserMessages && onEditUserMessage && msg.serverMessageId && !isLoading && !isGenerating && !isEditingUserMessage);
+  const isLocalFailedUserMessage = isUser && (msg.sendStatus === "failed" || msg.sendStatus === "cancelled") && !msg.serverMessageId;
+  const canEditUserMessage = isUser && Boolean(canEditUserMessages && onEditUserMessage && (msg.serverMessageId || isLocalFailedUserMessage) && !isLoading && !isGenerating && !isEditingUserMessage);
   const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !runtimeState.terminal);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
   const rowProfileDetailEnabled = typeof window !== "undefined" && Boolean((window as Window & { __AI_SPACE_CHAT_ROW_PROFILE_DETAIL?: boolean }).__AI_SPACE_CHAT_ROW_PROFILE_DETAIL);
@@ -323,11 +327,14 @@ function MessageRow({
     }
   };
 
+  const messageRenderKey = getMessageRenderKey(msg);
+
   return (
     <div
       ref={rowRef}
       data-chat-message-row="true"
-      data-message-id={displayMessageId || msg.id}
+      data-message-id={displayMessageId || messageRenderKey}
+      data-message-render-key={messageRenderKey}
       data-server-message-id={msg.serverMessageId ? String(msg.serverMessageId) : undefined}
       data-generation-task-id={msg.generationTaskId ? String(msg.generationTaskId) : undefined}
       data-message-role={msg.role}
@@ -455,7 +462,12 @@ function MessageRow({
                     {editError && <p className="mt-2 text-xs text-red-500" data-testid="chat-user-message-edit-error">{editError}</p>}
                   </div>
                 ) : (
-                  <UserMessageContent message={msg} imageLoadFailedLabel={imageLoadFailedLabel} />
+                  <UserMessageContent
+                    message={msg}
+                    imageLoadFailedLabel={imageLoadFailedLabel}
+                    onRetry={onRetryUserMessage ? () => onRetryUserMessage(msg) : undefined}
+                    onEditRequest={canEditUserMessage ? () => { setEditDraft(msg.content || ""); setEditError(null); setIsEditingUserMessage(true); } : undefined}
+                  />
                 )
               ) : (
                 <>

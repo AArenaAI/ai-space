@@ -10,6 +10,8 @@ import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/ch
 type UserMessageContentProps = {
   message: Message;
   imageLoadFailedLabel: string;
+  onRetry?: () => void;
+  onEditRequest?: () => void;
 };
 
 const LONG_USER_MESSAGE_CHAR_THRESHOLD = 2000;
@@ -71,7 +73,7 @@ function getCollapsedContent(content: string, t: (key: string, params?: Record<s
   return { isLong, preview, sizeLabel };
 }
 
-function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageContentProps) {
+function UserMessageContent({ message, imageLoadFailedLabel, onRetry, onEditRequest }: UserMessageContentProps) {
   const profileEnabled = isChatRenderProfileEnabled();
   const renderStartedAt = profileEnabled ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
   const { t } = useI18n();
@@ -81,6 +83,13 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
   const { quote, body } = useMemo(() => splitLeadingQuote(message.content || ""), [message.content]);
   const { isLong, preview, sizeLabel } = useMemo(() => getCollapsedContent(body, t), [body, t]);
   const visibleBody = isLong && !expanded ? preview : body;
+  const sendStatusLabel = message.sendStatus === "submitting"
+    ? "发送中"
+    : message.sendStatus === "failed"
+      ? "发送失败"
+      : message.sendStatus === "cancelled"
+        ? "已取消"
+        : "";
 
   useEffect(() => {
     if (!profileEnabled) return;
@@ -174,6 +183,23 @@ function UserMessageContent({ message, imageLoadFailedLabel }: UserMessageConten
             <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
             {expanded ? t("chat.userContent.collapseLong", { size: sizeLabel }) : t("chat.userContent.expandFull", { size: sizeLabel })}
           </button>
+        ) : null}
+        {sendStatusLabel ? (
+          <div className="flex items-center gap-2 text-[11px] leading-none" data-testid="user-message-send-status">
+            <span
+              className={cn(
+                message.sendStatus === "failed" || message.sendStatus === "cancelled" ? "text-red-400" : "text-text-tertiary"
+              )}
+            >
+              {sendStatusLabel}
+            </span>
+            {(message.sendStatus === "failed" || message.sendStatus === "cancelled") && onRetry ? (
+              <button type="button" onClick={onRetry} className="text-text-secondary underline-offset-2 hover:text-text-primary hover:underline" data-testid="user-message-retry-action">重试</button>
+            ) : null}
+            {(message.sendStatus === "failed" || message.sendStatus === "cancelled") && onEditRequest ? (
+              <button type="button" onClick={onEditRequest} className="text-text-secondary underline-offset-2 hover:text-text-primary hover:underline" data-testid="user-message-edit-action">编辑</button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

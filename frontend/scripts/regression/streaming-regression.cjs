@@ -250,16 +250,17 @@ test("unsubscribe removes listener and expired realtimeGet notifies subscribers 
   assert.equal(calls, 1);
 });
 
-test("clear removes pending runtime data and listeners", ({ mod }) => {
+test("clear removes runtime data, notifies mounted subscribers, and unsubscribe still detaches", ({ mod }) => {
   let calls = 0;
   const unsubscribe = mod.realtimeSubscribe("clear-entry", () => { calls += 1; });
   mod.realtimeUpdate("clear-entry", { content: "temporary" });
   assert.equal(calls, 1);
   mod.realtimeClear("clear-entry");
   assert.equal(mod.realtimeGet("clear-entry"), undefined);
+  assert.equal(calls, 2);
   unsubscribe();
   mod.realtimeUpdate("clear-entry", { content: "again" });
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
 });
 
 console.log("\nstreaming regression tests passed");

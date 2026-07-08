@@ -17,6 +17,10 @@ export type SingleSendMessageLike = {
   files?: any[];
   search?: boolean;
   searchStatus?: "searching" | "completed" | "failed";
+  clientMessageId?: string;
+  localRunId?: string;
+  sendStatus?: "local_committed" | "submitting" | "server_bound" | "failed" | "cancelled";
+  generationStatus?: "pending" | "reasoning" | "answering" | "completed" | "failed" | "stopped" | "cancelled";
 };
 
 export type SingleSendPrepareMode = "regenerate" | "skip-user" | "normal";
@@ -71,6 +75,7 @@ export function prepareSingleSendMessages<TMessage extends SingleSendMessageLike
   now,
 }: PrepareSingleSendMessagesOptions<TMessage>): SingleSendMessagePlan<TMessage> | undefined {
   const finalContent = content.trim();
+  const localRunId = createId();
 
   if (isRegenerate) {
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -82,6 +87,9 @@ export function prepareSingleSendMessages<TMessage extends SingleSendMessageLike
       createdAt: now(),
       search,
     }) as TMessage;
+    assistantMessage.clientMessageId = assistantMessage.id;
+    assistantMessage.localRunId = localRunId;
+    assistantMessage.generationStatus = "pending";
     return {
       mode: "regenerate",
       assistantMessage,
@@ -99,6 +107,9 @@ export function prepareSingleSendMessages<TMessage extends SingleSendMessageLike
       createdAt: now(),
       search,
     }) as TMessage;
+    assistantMessage.clientMessageId = assistantMessage.id;
+    assistantMessage.localRunId = localRunId;
+    assistantMessage.generationStatus = "pending";
     const syntheticUserMessage = {
       role: "user",
       content: finalContent,
@@ -121,12 +132,18 @@ export function prepareSingleSendMessages<TMessage extends SingleSendMessageLike
     createdAt: now(),
     files: userFiles,
   }) as TMessage;
+  userMessage.clientMessageId = userMessage.id;
+  userMessage.localRunId = localRunId;
+  userMessage.sendStatus = "submitting";
   const assistantMessage = createAssistantChatMessage({
     id: createId(),
     model: modelId,
     createdAt: now(),
     search,
   }) as TMessage;
+  assistantMessage.clientMessageId = assistantMessage.id;
+  assistantMessage.localRunId = localRunId;
+  assistantMessage.generationStatus = "pending";
   return {
     mode: "normal",
     assistantMessage,

@@ -246,6 +246,104 @@ tokenMode: stable
 - block anchor：历史加载 / prepend / hydrate 时以 `messageId + data-md-block-id + offset` 恢复阅读位置。
 - 将 `AssistantAnswerRenderer` 继续收敛成显式 reducer/state machine，避免状态分支重新散落。
 
+### 5. Gemini 式发送接受契约与本地消息状态机
+
+**状态:** ⬜ 需要系统实现；AI 回复显示层已接近长期方案，但发送接受契约仍需补齐
+
+**目标:**
+
+> 用户点发送后立即进入聊天流和 Stop 状态；Stop 立刻有效；网络失败不丢内容；本地 UUID 不再导致刷新/切屏/Stop 状态不一致。
+
+**长期语义:**
+
+```txt
+draft
+→ local_committed
+→ submitting
+→ server_bound
+→ generating
+→ completed
+
+失败/取消：
+submitting_failed / stream_failed / cancelled / stopped
+```
+
+**用户消息规则:**
+
+- 点击发送后，输入框 draft 立即转为本地 user message，输入框清空；这不是“丢失输入”，而是本地 commit。
+- user message 必须带本地稳定身份与发送状态：
+
+```ts
+clientMessageId?: string;
+localRunId?: string;
+serverMessageId?: number;
+sendStatus?: "local_committed" | "submitting" | "server_bound" | "failed" | "cancelled";
+```
+
+- `clientMessageId` 负责 React key / DOM identity / 本地失败重试编辑；创建后不随 server id 改变。
+- `serverMessageId` 只负责后端绑定、收藏、分享、刷新后的 canonical 身份。
+- `localRunId` 只负责一次发送行为：Stop、abort controller、user/assistant 配对、retry。
+- `/api/chat/init` 失败时，不把内容塞回输入框；本地 user row 保留为 `failed`，显示轻量 `发送失败 · 重试 / 编辑`。
+- Stop during submitting 必须 abort init request，并把 user row 标记为 `cancelled` 或可编辑重发。
+
+**AI 回复消息规则:**
+
+- 点击发送后可立即插入本地 assistant pending，但它必须带 `clientMessageId + localRunId`，不能作为长期孤儿 UUID。
+- `/api/chat/init` 成功后只 patch bind：
+
+```txt
+assistant.serverMessageId = assistant_message_id
+assistant.generationTaskId = task_id
+assistant.generationStatus = pending/generating
+```
+
+- 不允许删除 local row 再 append server row；否则会 remount、重复、Stop/actions 归属断裂。
+- `pending / reasoning / answering / completed` 继续走统一 `AssistantGenerationState`，不得由 `MessageRow`、`StreamingText`、actions 各自推断。
+
+**身份不混用规则:**
+
+```txt
+clientMessageId = 前端稳定身份 / React key
+serverMessageId = 后端持久化身份
+localRunId      = 一次发送/停止/重试行为身份
+```
+
+- React key 优先使用 `clientMessageId`，刷新后没有本地身份时才使用 `server:${serverMessageId}`。
+- server accepted 是 patch bind，不是 replace id。
+- merge/restore 必须走统一 identity resolver：
+  1. 双方都有 `serverMessageId` 时按 server id 合并；
+  2. 否则按 `clientMessageId`；
+  3. 否则按 `localRunId + role`；
+  4. 最后才 fallback 到 legacy `id`。
+
+**Stop 语义:**
+
+```txt
+submitting 阶段：
+  abort /api/chat/init，本地 run cancelled，底部回 Send
+
+generating 阶段：
+  abort stream + stop task API，保留已接受 user/assistant 与 partial answer
+```
+
+**不可回退规则:**
+
+1. 不允许再次把本地 UUID 当最终 message id / React key / runtime state id。
+2. 不允许 server id 返回后替换本地 key 导致 DOM remount。
+3. 不允许 `/api/chat/init` 未成功时把 `accepted=true` 当成 server accepted，除非已有完整本地 run 失败/取消恢复语义。
+4. 不允许 Stop 只在 task_id 返回后才有效；submitting 阶段 Stop 也必须取消 init。
+5. 不允许 init 失败后只补 assistant error 而让 user message 缺少 `failed/retry/edit` 状态。
+
+**回归要求:**
+
+- `init accepted` 前后 user row / assistant row DOM node 不变。
+- `data-message-render-key` 在 server bind 前后不变。
+- 同一 `serverMessageId`、同一 `localRunId + role` 不重复出现。
+- Stop during init 可 abort，且无 active task / 无 pending 残留。
+- init fail 后：user row 保留为 failed，assistant pending 不显示生成中，底部回 Send，可重试/编辑。
+- stream fail 后：server-bound user/assistant 保留，partial answer 保留，可继续/重试。
+- 切屏回来时 local row 和 server snapshot 合并成一条，不出现 local + server 双份。
+
 ---
 
 ## 优先级 2：模型选择与 Compare 可控感

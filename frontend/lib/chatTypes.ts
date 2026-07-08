@@ -24,10 +24,17 @@ export type MessageFile = {
   filename: string;
 };
 
+export type UserSendStatus = "local_committed" | "submitting" | "server_bound" | "failed" | "cancelled";
+export type AssistantGenerationStatus = "pending" | "reasoning" | "answering" | "completed" | "failed" | "stopped" | "cancelled";
+
 export interface Message {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  clientMessageId?: string;
+  localRunId?: string;
+  sendStatus?: UserSendStatus;
+  generationStatus?: AssistantGenerationStatus;
   reasoningContent?: string;
   model?: string;
   tokensUsed?: number;

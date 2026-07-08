@@ -14,6 +14,7 @@ import StableMarkdownRenderer from "./StableMarkdownRenderer";
 import { preheatMarkdownTokens } from "@/lib/markdown/markdownTokenWorkerClient";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
 import { getConversationScrollState, saveConversationScrollState } from "@/lib/chatConversationScrollState";
+import { getMessageRenderKey } from "@/lib/chatMessageIdentity";
 
 type MarkdownRendererProps = { content: string; isStreaming?: boolean; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number };
 
@@ -79,6 +80,7 @@ interface MessageListProps {
   conversationId?: number;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
+  onRetryUserMessage?: (message: Message) => void | Promise<void>;
   onEditUserMessage?: (message: Message, content: string) => Promise<void>;
   canEditUserMessages?: boolean;
   isCompare?: boolean;
@@ -189,6 +191,7 @@ function MessageList({
   conversationId,
   onRegenerate,
   onContinueGenerate,
+  onRetryUserMessage,
   onEditUserMessage,
   canEditUserMessages = false,
   isCompare = false,
@@ -271,9 +274,10 @@ function MessageList({
   const renderStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
   const getStableRunningAssistantDisplayId = useCallback((message: Message) => {
-    if (message.role !== "assistant") return message.id;
+    const renderKey = getMessageRenderKey(message);
+    if (message.role !== "assistant") return renderKey;
     const registry = runningAssistantDisplayIdsRef.current;
-    const messageKey = `${conversationId ?? "none"}:msg:${message.id}`;
+    const messageKey = `${conversationId ?? "none"}:msg:${renderKey}`;
     const taskOrServerId = message.generationTaskId || message.serverMessageId;
     const groupKey = taskOrServerId ? `${conversationId ?? "none"}:task:${taskOrServerId}` : undefined;
     const existingForMessage = registry.byMessageId.get(messageKey);
@@ -287,21 +291,21 @@ function MessageList({
         registry.byGroup.set(groupKey, existingForMessage);
         return existingForMessage;
       }
-      const seededDisplayId = message.serverMessageId && message.id === String(message.serverMessageId) && !message.completedAt
+      const seededDisplayId = message.serverMessageId && !message.clientMessageId && message.id === String(message.serverMessageId) && !message.completedAt
         ? `assistant-task:${taskOrServerId}`
-        : message.id;
+        : renderKey;
       registry.byGroup.set(groupKey, seededDisplayId);
       registry.byMessageId.set(messageKey, seededDisplayId);
       return seededDisplayId;
     }
     if (existingForMessage) return existingForMessage;
-    registry.byMessageId.set(messageKey, message.id);
-    return message.id;
+    registry.byMessageId.set(messageKey, renderKey);
+    return renderKey;
   }, [conversationId]);
 
   useEffect(() => {
     const registry = runningAssistantDisplayIdsRef.current;
-    const liveMessageKeys = new Set(messages.map((message) => `${conversationId ?? "none"}:msg:${message.id}`));
+    const liveMessageKeys = new Set(messages.map((message) => `${conversationId ?? "none"}:msg:${getMessageRenderKey(message)}`));
     for (const key of Array.from(registry.byMessageId.keys())) {
       if (!key.startsWith(`${conversationId ?? "none"}:msg:`) || !liveMessageKeys.has(key)) registry.byMessageId.delete(key);
     }
@@ -2302,6 +2306,7 @@ function MessageList({
                 isFavorited={isFavorited}
                 onRegenerate={onRegenerate}
                 onContinueGenerate={onContinueGenerate}
+                onRetryUserMessage={onRetryUserMessage}
                 onEditUserMessage={onEditUserMessage}
                 canEditUserMessages={canEditUserMessages && !effectiveIsCompare}
                 onForkCompare={onForkCompare}

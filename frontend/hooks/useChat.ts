@@ -519,7 +519,6 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     sendMessage,
   });
 
-
   // 向上滚动加载更多历史消息
   const loadMoreMessages = useLoadMoreMessagesAction({
     apiBaseUrl: API_BASE_URL,
@@ -598,6 +597,27 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     return isConversationGenerationActive(currentState);
   }, [currentConversation, generationStore, messages, hasCurrentPendingLocalAssistant, hasCurrentMainStream, hasRuntimeActiveStream, hasRuntimeGenerationTask, hasRuntimePendingOptimistic]);
 
+  const retryUserMessage = useCallback(async (message: Message) => {
+    if (message.role !== "user" || isLoading || isCurrentConversationGenerating) return;
+    const fileIds = message.files?.map((file) => file.public_id).filter((id): id is string => Boolean(id)) || [];
+    const attachments = message.files?.map((file) => ({
+      filename: file.filename,
+      content: "",
+      type: file.type,
+      public_id: file.public_id,
+    })) || undefined;
+    await sendMessage(
+      message.content || "",
+      lastReasoningRef.current,
+      false,
+      message.search ?? lastSearchRef.current,
+      0,
+      false,
+      attachments,
+      fileIds.length > 0 ? fileIds : undefined,
+    );
+  }, [isLoading, isCurrentConversationGenerating, sendMessage]);
+
   const editUserMessage = useChatUserMessageEditRuntime({
     apiBaseUrl: API_BASE_URL,
     messages,
@@ -630,6 +650,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     stopGeneration: stopCurrentConversationGeneration,
     clearMessages,
     regenerateMessage,
+    retryUserMessage,
     editUserMessage,
     currentConversation,
     effectiveSkillKey,

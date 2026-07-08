@@ -267,6 +267,45 @@ const response = (ok, data, status = ok ? 200 : 500, headers = {}) => ({
     assert.equal(decision.reason, "local_optimistic_newer_than_bootstrap");
   });
 
+  await test("buildConversationRestoreMergeDecision rejects stale restore over fresh local run ids", () => {
+    const decision = buildConversationRestoreMergeDecision({
+      conversationId: 7,
+      source: "restore",
+      currentMessages: [
+        { id: "client-user-1", role: "user", content: "fresh", clientMessageId: "client-user-1", localRunId: "run-1", sendStatus: "submitting" },
+        { id: "client-assistant-1", role: "assistant", content: "", clientMessageId: "client-assistant-1", localRunId: "run-1", generationStatus: "pending" },
+      ],
+      currentSnapshotVersion: "10",
+      currentUpdatedAt: 10_000,
+      pendingOptimisticMessages: [],
+      activeEntries: [],
+      restoreData: {
+        snapshot_version: "9",
+        messages: [{ id: 1, role: "user", content: "old" }],
+      },
+    });
+    assert.equal(decision.accepted, false);
+    assert.equal(decision.reason, "local_run_newer_than_restore");
+  });
+
+  await test("buildConversationRestoreMergeDecision rejects bootstrap over fresh local run ids", () => {
+    const decision = buildConversationRestoreMergeDecision({
+      conversationId: 7,
+      source: "bootstrap",
+      currentMessages: [{ id: "client-user-1", role: "user", content: "fresh", clientMessageId: "client-user-1", localRunId: "run-1", sendStatus: "submitting" }],
+      currentSnapshotVersion: "1",
+      currentUpdatedAt: 1000,
+      pendingOptimisticMessages: [],
+      activeEntries: [],
+      restoreData: {
+        snapshot_version: "2",
+        messages: [{ id: 1, role: "user", content: "old" }],
+      },
+    });
+    assert.equal(decision.accepted, false);
+    assert.equal(decision.reason, "local_optimistic_newer_than_bootstrap");
+  });
+
   await test("buildConversationRestoreMergeDecision accepts terminal backend status over running local task", () => {
     const decision = buildConversationRestoreMergeDecision({
       conversationId: 7,

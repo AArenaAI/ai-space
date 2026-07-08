@@ -103,6 +103,8 @@
     "test:chat-conversation-switch-real-performance": "node scripts/regression/chat-conversation-switch-real-performance.cjs",
     "profile:chat-history-real": "node scripts/regression/chat-history-real-profile.cjs",
     "test:chat-streaming-state-fixture": "node scripts/regression/chat-streaming-state-fixture.cjs",
+    "test:chat-local-send-run-fixture": "node scripts/regression/chat-local-send-run-fixture.cjs",
+    "test:chat-local-send-switch-restore-fixture": "node scripts/regression/chat-local-send-switch-restore-fixture.cjs",
     "test:chat-activity-entry-states-fixture": "node scripts/regression/chat-activity-entry-states-fixture.cjs",
     "test:chat-final-render-live": "node scripts/regression/chat-final-render-live.cjs",
     "test:chat-compare-activity-dual-live": "node scripts/regression/chat-compare-activity-dual-live.cjs",

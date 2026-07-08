@@ -35,6 +35,7 @@ export type ChatMessageListItemProps = {
   isFavorited: (serverMessageId: number) => boolean;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
+  onRetryUserMessage?: MessageRowProps["onRetryUserMessage"];
   onEditUserMessage?: (message: Message, content: string) => Promise<void>;
   canEditUserMessages?: boolean;
   onForkCompare?: (messageId: number) => void;
@@ -77,6 +78,7 @@ function ChatMessageListItem({
   isFavorited,
   onRegenerate,
   onContinueGenerate,
+  onRetryUserMessage,
   onEditUserMessage,
   canEditUserMessages,
   onForkCompare,
@@ -118,6 +120,7 @@ function ChatMessageListItem({
       isFavorited={isFavorited}
       onRegenerate={onRegenerate}
       onContinueGenerate={onContinueGenerate}
+      onRetryUserMessage={onRetryUserMessage}
       onEditUserMessage={onEditUserMessage}
       canEditUserMessages={canEditUserMessages}
       onForkCompare={onForkCompare}

@@ -83,21 +83,29 @@ function loadModule(file) {
         buildNewConversationTitle: (content) => content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : ""),
         prepareSingleSendMessages: ({ content, messages, modelId, isRegenerate, skipUserMessage, attachments, search, createId, now }) => {
           if (isRegenerate && !messages.some((m) => m.role === "user")) return undefined;
-          const assistant = { id: createId(), role: "assistant", content: "", model: modelId, createdAt: now(), searchStatus: search ? "searching" : undefined };
-          const user = skipUserMessage ? { id: createId(), role: "user", content, createdAt: now() } : { id: createId(), role: "user", content: content.trim(), files: attachments || [], createdAt: now() };
+          const localRunId = createId();
+          const assistant = { id: createId(), role: "assistant", content: "", model: modelId, createdAt: now(), searchStatus: search ? "searching" : undefined, localRunId, generationStatus: "pending" };
+          assistant.clientMessageId = assistant.id;
+          const user = skipUserMessage
+            ? { id: createId(), role: "user", content, createdAt: now(), localRunId, sendStatus: "submitting" }
+            : { id: createId(), role: "user", content: content.trim(), files: attachments || [], createdAt: now(), localRunId, sendStatus: "submitting" };
+          user.clientMessageId = user.id;
           return {
             mode: skipUserMessage ? "skip-user" : "normal",
             assistantMessage: assistant,
             userMessage: skipUserMessage ? undefined : user,
             contextMessages: [...messages, user],
-            visibleMessages: skipUserMessage ? [assistant] : [user, assistant],
           };
         },
-        applySingleSendMessagePlan: (prev, plan) => [...prev, ...plan.visibleMessages],
+        applySingleSendMessagePlan: (prev, plan) => [...prev, ...(plan.userMessage ? [plan.userMessage] : []), plan.assistantMessage],
         runSingleChatInit: (...args) => singleInitImpl(...args),
         runSingleChatRequest: (...args) => singleRequestImpl(...args),
       };
     }
+    if (specifier === "@/lib/chatMessageIdentity") return {
+      sameChatMessage: (a, b) => Boolean((a.serverMessageId && b.serverMessageId && a.serverMessageId === b.serverMessageId) || (a.clientMessageId && b.clientMessageId && a.clientMessageId === b.clientMessageId) || (a.localRunId && b.localRunId && a.role === b.role && a.localRunId === b.localRunId) || (a.id && b.id && a.id === b.id)),
+      bindServerMessage: (local, patch) => ({ ...local, ...patch, id: local.id, clientMessageId: local.clientMessageId, localRunId: local.localRunId }),
+    };
     if (specifier === "@/lib/chatConversationCreateCoordinator") {
       return {
         shouldCreateConversation: ({ token }) => Boolean(token),
@@ -257,9 +265,14 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
   assert.equal(events.find((e) => e[0] === "created")?.[1], 42);
   assert.equal(state.messages.length, 2);
   assert.equal(state.messages[1].role, "assistant");
-  assert.equal(state.messages[1].id, "502");
+  assert.notEqual(state.messages[1].id, "502");
+  assert.equal(state.messages[1].id, state.messages[1].clientMessageId);
   assert.equal(state.messages[1].serverMessageId, 502);
   assert.equal(state.messages[1].generationTaskId, 900);
+  assert.equal(state.messages[0].id, state.messages[0].clientMessageId);
+  assert.equal(state.messages[0].serverMessageId, 501);
+  assert.equal(state.messages[0].sendStatus, "server_bound");
+  assert.equal(state.messages[0].localRunId, state.messages[1].localRunId);
   assert.equal(request.conversationId, 42);
   assert.equal(request.modelId, "m1");
   assert.deepEqual(request.messageFileIds, ["f1"]);
@@ -267,7 +280,7 @@ async function testSingleSendCreatesConversationAndRunsRequest() {
   assert.equal(refs.abortReasonRef.current, null);
   const patches = runtimePatches(42);
   assert.ok(patches.some((patch) => patch.messages?.some((message) => message.role === "user" && message.content === "hello world")));
-  assert.ok(patches.some((patch) => patch.pendingOptimisticMessages?.some((message) => message.id === "502")));
+  assert.ok(patches.some((patch) => patch.pendingOptimisticMessages?.some((message) => message.serverMessageId === 502 && message.id === state.messages[1].id)));
   assert.deepEqual(patches.at(-1).pendingOptimisticMessages, []);
   assert.equal(Object.prototype.hasOwnProperty.call(patches.at(-1), "messages"), false, "clearing pending optimistic assistants must not overwrite fresher streamed messages");
   assert.ok(events.some((e) => e[0] === "event" && e[1] === "conversation-updated"));
@@ -291,7 +304,9 @@ async function testSingleSendRequestErrorPatchesAssistant() {
   await accepted.completion;
   assert.equal(accepted.accepted, true);
   assert.equal(state.messages.length, 2);
+  assert.equal(state.messages[0].sendStatus, "failed");
   assert.equal(state.messages[1].error, "boom");
+  assert.equal(state.messages[1].generationStatus, "failed");
 }
 
 async function testCompareSendStartsCompareAndRunCoordinator() {
