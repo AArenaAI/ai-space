@@ -37,6 +37,31 @@ async function openLatestActivityPanel(page) {
   return panel;
 }
 
+async function sampleGenerationFrame(page, label) {
+  return page.evaluate((label) => {
+    const row = document.querySelector('[data-chat-message-row="true"][data-message-role="assistant"]');
+    const scroller = document.querySelector('[data-chat-scroll-container="true"]');
+    const frame = row?.querySelector('[data-chat-generation-frame="true"]');
+    const inner = row?.querySelector('[data-chat-generation-frame-inner="true"]');
+    const slot = row?.querySelector('[data-chat-stream-reasoning-slot="true"]');
+    return {
+      label,
+      fixturePhase: document.querySelector('[data-testid="fixture-phase"]')?.textContent || '',
+      scrollerWidth: scroller?.getBoundingClientRect().width || 0,
+      rowWidth: row?.getBoundingClientRect().width || 0,
+      rowHeight: row?.getBoundingClientRect().height || 0,
+      framePhase: frame?.getAttribute('data-chat-generation-phase') || '',
+      frameLocked: frame?.getAttribute('data-chat-generation-height-locked') || '',
+      frameHeight: frame?.getBoundingClientRect().height || 0,
+      innerHeight: inner?.getBoundingClientRect().height || 0,
+      slotHeight: slot?.getBoundingClientRect().height || 0,
+      hasPendingShell: Boolean(row?.querySelector('[data-chat-pending-shell="true"]')),
+      hasCursor: Boolean(row?.querySelector('.animate-cursor-blink')),
+      text: (row?.innerText || '').replace(/\s+/g, ' ').trim(),
+    };
+  }, label);
+}
+
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
@@ -57,6 +82,7 @@ async function openLatestActivityPanel(page) {
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
   await page.waitForSelector('[data-testid="chat-streaming-state-fixture"]', { timeout: 30_000 });
   await page.waitForSelector('[data-chat-activity-panel="true"]', { timeout: 10_000 });
+  const pendingFrameSnapshot = await sampleGenerationFrame(page, 'pending');
   await page.waitForFunction(() => document.querySelector('[data-testid="fixture-phase"]')?.textContent === 'mixed-held', null, { timeout: 10_000 });
   await page.waitForFunction(() => {
     const phase = document.querySelector('[data-testid="fixture-phase"]')?.textContent || '';
@@ -69,6 +95,22 @@ async function openLatestActivityPanel(page) {
     body: document.body.innerText,
     panelText: document.querySelector('[data-chat-activity-panel="true"]')?.textContent || '',
   }));
+  const reasoningFrameSnapshot = await sampleGenerationFrame(page, 'reasoning');
+  if (pendingFrameSnapshot.scrollerWidth <= 0 || pendingFrameSnapshot.rowWidth < 300) {
+    issues.push(`fixture message list width is invalid for height probing: ${JSON.stringify(pendingFrameSnapshot)}`);
+  }
+  if (pendingFrameSnapshot.framePhase !== 'pending' || reasoningFrameSnapshot.framePhase !== 'reasoning') {
+    issues.push(`generation phase did not progress pending -> reasoning: ${JSON.stringify({ pendingFrameSnapshot, reasoningFrameSnapshot })}`);
+  }
+  if (reasoningFrameSnapshot.rowHeight + 1 < pendingFrameSnapshot.rowHeight) {
+    issues.push(`pending -> reasoning row height collapsed: ${JSON.stringify({ pendingFrameSnapshot, reasoningFrameSnapshot })}`);
+  }
+  if (pendingFrameSnapshot.slotHeight > 0 && reasoningFrameSnapshot.slotHeight > 0 && Math.abs(reasoningFrameSnapshot.slotHeight - pendingFrameSnapshot.slotHeight) > 1) {
+    issues.push(`pending and reasoning status slots should share the same visible height: ${JSON.stringify({ pendingFrameSnapshot, reasoningFrameSnapshot })}`);
+  }
+  if (reasoningFrameSnapshot.hasCursor) {
+    issues.push(`reasoning-only state should not render an external streaming cursor: ${JSON.stringify(reasoningFrameSnapshot)}`);
+  }
   if (!mixedSnapshot.panelText.includes('先分析搜索结果')) {
     issues.push('reasoning text did not render in activity panel during mixed reasoning phase');
   }

@@ -7,7 +7,6 @@ import { useI18n } from "@/lib/i18n";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import { getModelAvatarMeta } from "@/lib/models/modelAvatars";
 import type { InferredGroup } from "@/lib/groups";
-import { isMessageGenerating } from "@/lib/chatContent";
 import { isTerminalMessage, resolveChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { isAssistantFailureState } from "@/lib/chatErrorState";
 import { CHAT_MESSAGE_ROW_CLASS } from "./chatLayout";
@@ -18,6 +17,7 @@ import UserMessageContent from "./UserMessageContent";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { ModelAvatar } from "./ModelAvatar";
 import { emitChatRenderProfileEvent } from "@/lib/chatRenderProfile";
+import { resolveAssistantGenerationState, shouldSubscribeAssistantRealtime } from "@/lib/chatGenerationState";
 
 type MarkdownRendererComponent = Parameters<typeof AssistantMessageContent>[0]["MarkdownRenderer"];
 
@@ -141,11 +141,16 @@ function MessageRow({
   const initialViewportState = forceHydrateRichText || skipViewportObservers;
   const [isNearViewport, setIsNearViewport] = useState(initialViewportState);
   const [isInViewport, setIsInViewport] = useState(initialViewportState);
-  const terminalMessage = isTerminalMessage(msg);
-  const hasAssistantGenerationTask = Boolean(msg.generationTaskId || msg.backgroundTaskId || msg.activityStatus);
-  const isStreaming = isLoading && msg.role === "assistant" && !terminalMessage && isLatestAssistant && hasAssistantGenerationTask;
-  const realtime = useMessageRealtime(msg.id, isStreaming);
+  const shouldSubscribeRealtime = shouldSubscribeAssistantRealtime({ message: msg, isLatestAssistant });
+  const realtime = useMessageRealtime(msg.id, shouldSubscribeRealtime);
   const runtimeState = resolveChatMessageRuntimeState({ message: msg, realtime });
+  const assistantGenerationState = resolveAssistantGenerationState({
+    message: msg,
+    runtimeState,
+    isLoading,
+    isLatestAssistant,
+  });
+  const isStreaming = assistantGenerationState.isStreaming;
   const realtimeHasVisiblePayload = Boolean(
     runtimeState.content?.trim() ||
     runtimeState.answerContent?.trim() ||
@@ -154,11 +159,11 @@ function MessageRow({
   const canBypassBrowsingHydrationDefer = forceHydrateRichText && !isStreaming;
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
-  const isGenerating = !isUser && isMessageGenerating({ ...msg, ...runtimeState }, isStreaming);
+  const isGenerating = !isUser && assistantGenerationState.isGenerating;
   const assistantFailureMessage = { ...msg, content: runtimeState.content || msg.content, errorCode: runtimeState.errorCode || msg.errorCode, phase: runtimeState.phase };
   const isAssistantFailure = !isUser && isAssistantFailureState(assistantFailureMessage);
   const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
-  const canRegenerate = !isUser && !isAssistantFailure && !msg.stopped && (isLast || !msg.content) && !isLoading && !isGenerating;
+  const canRegenerate = !isUser && !isAssistantFailure && !msg.stopped && (isLast || !msg.content) && assistantGenerationState.canShowActions;
   const canEditUserMessage = isUser && Boolean(canEditUserMessages && onEditUserMessage && msg.serverMessageId && !isLoading && !isGenerating && !isEditingUserMessage);
   const suppressAppearAnimation = historyPrependSettling || deferRichTextHydration || isGenerating || (!isUser && !msg.content?.trim() && !runtimeState.terminal);
   const assistantAvatarMeta = getModelAvatarMeta(model || msg.model || "AI");
@@ -454,7 +459,7 @@ function MessageRow({
                 )
               ) : (
                 <>
-                  <AssistantMessageContent message={msg} isStreaming={isStreaming} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} onOpenActivity={() => onOpenActivity?.(msg)} />
+                  <AssistantMessageContent message={msg} isStreaming={isStreaming} runtimeState={runtimeState} generationState={assistantGenerationState} MarkdownRenderer={MarkdownRenderer} shouldHydrateRichText={!blockRichTextHydration && (isNearViewport || forceHydrateRichText)} priorityHydrateRichText={!blockRichTextHydration && (forceHydrateRichText || stabilizeInitialRichText || deferOffscreenRichTextHydration)} allowRichLiteFallback={allowRichLiteFallback || forceStableRichLiteFallback || isInitialReadingAssistant || isViewedAssistant} compactRichLitePreview={!historyPrependSettling && !forceStableRichLiteFallback && !isInitialReadingAssistant && !isViewedAssistant} recoverEmptyContent={isLast} onRegenerate={onRegenerate} onOpenActivity={() => onOpenActivity?.(msg)} />
                   {msg.stopped && !isAssistantFailure && msg.content?.trim() && onContinueGenerate && (
                     <button
                       onClick={onContinueGenerate}
@@ -467,7 +472,7 @@ function MessageRow({
                 </>
               )}
             </div>
-            {!selectMode && !isEditingUserMessage && !isStreaming && !isGenerating && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
+            {!selectMode && !isEditingUserMessage && (isUser || assistantGenerationState.canShowActions) && (isUser || msg.content?.trim() || msg.completedAt || msg.stopped || msg.errorCode) && (
               <MessageActions
                 onCopy={() => handleCopy(msg.content)}
                 onEdit={canEditUserMessage ? () => { setEditDraft(msg.content || ""); setEditError(null); setIsEditingUserMessage(true); } : undefined}

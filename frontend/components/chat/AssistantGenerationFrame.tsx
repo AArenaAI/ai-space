@@ -2,8 +2,7 @@
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-
-export type AssistantGenerationPhase = "pending" | "reasoning" | "answering" | "source-only" | "completed" | "failed" | "empty";
+import { ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT, isActiveGenerationPhase, type AssistantGenerationPhase } from "@/lib/chatGenerationState";
 
 const HEIGHT_TRANSITION_MS = 180;
 
@@ -24,18 +23,19 @@ export default function AssistantGenerationFrame({
   const rafRef = useRef<number | null>(null);
   const [lockedHeight, setLockedHeight] = useState<number | null>(null);
   const [transitioning, setTransitioning] = useState(false);
+  const activeGenerationPhase = isActiveGenerationPhase(phase);
 
   useLayoutEffect(() => {
-    const inner = innerRef.current;
-    if (!inner || typeof ResizeObserver === "undefined") return;
-    previousHeightRef.current = inner.getBoundingClientRect().height;
+    const frame = frameRef.current;
+    if (!frame || typeof ResizeObserver === "undefined") return;
+    previousHeightRef.current = frame.getBoundingClientRect().height;
     const observer = new ResizeObserver((entries) => {
       const height = entries[0]?.contentRect.height;
       if (typeof height === "number" && Number.isFinite(height) && !transitioning) {
         previousHeightRef.current = height;
       }
     });
-    observer.observe(inner);
+    observer.observe(frame);
     return () => observer.disconnect();
   }, [transitioning]);
 
@@ -50,7 +50,7 @@ export default function AssistantGenerationFrame({
 
     const nextHeight = inner.getBoundingClientRect().height;
     if (previousPhase === phase) {
-      previousHeightRef.current = nextHeight;
+      previousHeightRef.current = frame.getBoundingClientRect().height || nextHeight;
       return;
     }
 
@@ -59,12 +59,12 @@ export default function AssistantGenerationFrame({
     // shrink before expanding into reasoning/answering.
     const previousHeight = frame.getBoundingClientRect().height || previousHeightRef.current || nextHeight;
     previousPhaseRef.current = phase;
-    previousHeightRef.current = nextHeight;
+    previousHeightRef.current = previousHeight;
 
     if (releaseTimerRef.current) window.clearTimeout(releaseTimerRef.current);
     if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
 
-    if (phase === "completed" || phase === "empty" || Math.abs(previousHeight - nextHeight) <= 1) {
+    if (phase === "completed" || phase === "empty") {
       setTransitioning(false);
       setLockedHeight(null);
       return;
@@ -73,12 +73,23 @@ export default function AssistantGenerationFrame({
     setTransitioning(false);
     setLockedHeight(previousHeight);
     rafRef.current = window.requestAnimationFrame(() => {
+      const measuredHeight = innerRef.current?.getBoundingClientRect().height || previousHeight;
+      const targetHeight = Math.max(previousHeight, measuredHeight);
+      if (Math.abs(previousHeight - targetHeight) <= 1) {
+        setTransitioning(false);
+        setLockedHeight(previousHeight);
+        releaseTimerRef.current = window.setTimeout(() => {
+          setLockedHeight(null);
+          previousHeightRef.current = frameRef.current?.getBoundingClientRect().height || targetHeight;
+        }, HEIGHT_TRANSITION_MS + 40);
+        return;
+      }
       setTransitioning(true);
-      setLockedHeight(nextHeight);
+      setLockedHeight(targetHeight);
       releaseTimerRef.current = window.setTimeout(() => {
         setTransitioning(false);
         setLockedHeight(null);
-        previousHeightRef.current = innerRef.current?.getBoundingClientRect().height ?? nextHeight;
+        previousHeightRef.current = frameRef.current?.getBoundingClientRect().height || targetHeight;
       }, HEIGHT_TRANSITION_MS + 40);
     });
 
@@ -96,14 +107,16 @@ export default function AssistantGenerationFrame({
       data-chat-generation-height-locked={lockedHeight === null ? "false" : "true"}
       className={cn(
         "relative w-full min-w-0 overflow-hidden",
-        phase === "pending" && lockedHeight === null && "min-h-[4.25rem]",
         transitioning && "transition-[height]",
         className,
       )}
-      style={lockedHeight === null ? undefined : {
-        height: lockedHeight,
-        transitionDuration: `${HEIGHT_TRANSITION_MS}ms`,
-        transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+      style={{
+        ...(activeGenerationPhase ? { minHeight: ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT } : {}),
+        ...(lockedHeight === null ? {} : {
+          height: lockedHeight,
+          transitionDuration: `${HEIGHT_TRANSITION_MS}ms`,
+          transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+        }),
       }}
     >
       <div ref={innerRef} data-chat-generation-frame-inner="true" className="w-full min-w-0">

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
+import { ACTIVE_GENERATION_STATUS_SLOT_INNER_CLASS, ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT } from "@/lib/chatGenerationState";
 
 const DEFAULT_COLLAPSE_THRESHOLD = 0;
 
@@ -47,7 +48,7 @@ export function ThinkBlock({
   const collapsedLabel = shouldCollapseByDefault && !expanded ? ` · ${t("chat.reasoning.collapsed")}` : "";
 
   return (
-    <div className="mb-2">
+    <div className={ACTIVE_GENERATION_STATUS_SLOT_INNER_CLASS} style={{ minHeight: ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT }} data-chat-stream-reasoning-slot="true">
       <button
         onClick={() => onOpenActivity?.()}
         aria-expanded={false}
@@ -60,12 +61,6 @@ export function ThinkBlock({
           className="h-3.5 w-3.5 -rotate-90 shrink-0 text-text-tertiary/80"
         />
       </button>
-      {inlineActivity && (
-        <div className="mt-2">
-          {inlineActivity}
-        </div>
-      )}
-
     </div>
   );
 }

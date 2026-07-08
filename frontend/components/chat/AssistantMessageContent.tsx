@@ -5,13 +5,13 @@ import type { ComponentType, ReactNode } from "react";
 import { AlertCircle, ChevronDown, RefreshCw } from "lucide-react";
 import { Message } from "@/lib/chatTypes";
 import { useI18n } from "@/lib/i18n";
-import { isMessageGenerating } from "@/lib/chatContent";
 import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
 import { isTerminalMessage, resolveChatMessageRuntimeState, type ChatMessageRuntimeState } from "@/lib/chatMessageRuntimeState";
 import { getAssistantFailureCopy, isAssistantFailureState } from "@/lib/chatErrorState";
 import { AssistantAnswerRenderer } from "./AssistantAnswerRenderer";
 import { normalizeSearchSources } from "@/lib/searchSources";
+import { resolveAssistantGenerationState, type AssistantGenerationState } from "@/lib/chatGenerationState";
 
 
 type MarkdownRendererComponent = ComponentType<{ content: string; shouldHydrateRichText?: boolean; priorityHydrateRichText?: boolean; allowRichLiteFallback?: boolean; compactRichLitePreview?: boolean; messageId?: string | number }>;
@@ -82,6 +82,8 @@ export function AssistantMessageContent({
   onRegenerate,
   onOpenActivity,
   inlineActivity,
+  runtimeState: providedRuntimeState,
+  generationState: providedGenerationState,
 }: {
   message: Message;
   isStreaming: boolean;
@@ -95,12 +97,20 @@ export function AssistantMessageContent({
   onRegenerate?: () => void;
   onOpenActivity?: () => void;
   inlineActivity?: ReactNode;
+  runtimeState?: ChatMessageRuntimeState;
+  generationState?: AssistantGenerationState;
 }) {
   const { t } = useI18n();
   const terminalMessage = isTerminalMessage(message);
-  const realtime = useMessageRealtime(message.id, !terminalMessage || isStreaming);
-  const runtimeState = resolveChatMessageRuntimeState({ message, realtime });
-  const generating = isMessageGenerating({ ...message, ...runtimeState }, isStreaming);
+  const realtime = useMessageRealtime(message.id, !providedRuntimeState && (!terminalMessage || isStreaming));
+  const runtimeState = providedRuntimeState || resolveChatMessageRuntimeState({ message, realtime });
+  const generationState = providedGenerationState || resolveAssistantGenerationState({
+    message,
+    runtimeState,
+    isLoading: isStreaming,
+    isLatestAssistant: isStreaming,
+  });
+  const generating = generationState.isGenerating;
   const realtimeHasVisiblePayload = !!(
     runtimeState.content?.trim() ||
     runtimeState.answerContent?.trim() ||
@@ -176,7 +186,7 @@ export function AssistantMessageContent({
     <AssistantAnswerRenderer
       message={message}
       runtimeState={runtimeState}
-      generating={generating}
+      generationState={generationState}
       shouldRenderStreamingText={shouldRenderStreamingText}
       keepReasoningExpanded={keepReasoningExpanded}
       className={className}

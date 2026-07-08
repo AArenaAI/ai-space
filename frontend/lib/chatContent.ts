@@ -89,6 +89,16 @@ export function isMessageGenerating(msg: MessageGenerationLike, isStreaming: boo
   if (isStreaming) return true;
   if (isTerminalMessage(msg as any)) return false;
   if (msg.serverGenerationStatus === "incomplete") return false;
+  if (
+    msg.phase === "waiting_provider"
+    || msg.phase === "starting"
+    || msg.phase === "searching"
+    || msg.phase === "reasoning"
+    || msg.phase === "thinking"
+    || msg.phase === "streaming_answer"
+    || msg.phase === "generating"
+    || msg.phase === "finalizing"
+  ) return true;
   if (msg.activityStatus?.status === "running" || msg.activityStatus?.status === "searching") return true;
   if (msg.searchStatus === "searching") return true;
   if (msg.generationTaskId || msg.backgroundTaskId || msg.useBackground || msg.isComplexTask) return true;

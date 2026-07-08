@@ -11,6 +11,7 @@ import { DeferredMarkdownRenderer } from "./DeferredMarkdownRenderer";
 import { StreamingText } from "./StreamingText";
 import { ThinkBlock } from "./ThinkBlock";
 import { normalizeSearchSources } from "@/lib/searchSources";
+import { resolveAssistantAnswerRenderState, type AssistantGenerationState } from "@/lib/chatGenerationState";
 
 type MarkdownRendererComponent = ComponentType<{
   content: string;
@@ -27,54 +28,10 @@ function generationElapsedMs(message: Message, runtimeState: ChatMessageRuntimeS
   return start ? Math.max(0, end - start) : 0;
 }
 
-function resolveAnswerRenderState({
-  generating,
-  runtimeState,
-  shouldRenderStreamingText,
-}: {
-  generating: boolean;
-  runtimeState: ChatMessageRuntimeState;
-  shouldRenderStreamingText: boolean;
-}): "pending" | "streaming" | "settling" | "completed-stable" | "hydrated" {
-  if (generating) return "streaming";
-  if (shouldRenderStreamingText && runtimeState.terminal) return "settling";
-  if (shouldRenderStreamingText) return runtimeState.content?.trim() ? "settling" : "pending";
-  if (runtimeState.terminal) return "hydrated";
-  return runtimeState.content?.trim() ? "completed-stable" : "pending";
-}
-
-function resolveGenerationPhase({
-  generating,
-  runtimeState,
-}: {
-  generating: boolean;
-  runtimeState: ChatMessageRuntimeState;
-}): "pending" | "reasoning" | "answering" | "completed" | "empty" {
-  const runningTimelineSteps = runtimeState.statusTimeline?.filter((step) => step.status === "running") || [];
-  const hasRunningReasoning = runningTimelineSteps.some((step) => step.kind === "reasoning");
-  const hasRunningAnswer = runningTimelineSteps.some((step) => step.kind === "streaming_answer");
-  const parsedRuntimeContent = parseThinkContent(runtimeState.content || "");
-  const hasReasoning = Boolean(runtimeState.reasoningContent?.trim() || parsedRuntimeContent.reasoning?.trim())
-    || runtimeState.phase === "reasoning"
-    || runtimeState.phase === "thinking"
-    || hasRunningReasoning;
-  const hasAnswer = Boolean((runtimeState.answerContent || parsedRuntimeContent.answer || "").trim())
-    || runtimeState.phase === "streaming_answer"
-    || runtimeState.phase === "generating"
-    || hasRunningAnswer;
-  if (generating) {
-    if (hasAnswer) return "answering";
-    if (hasReasoning) return "reasoning";
-    return "pending";
-  }
-  if (runtimeState.terminal || hasReasoning || hasAnswer) return "completed";
-  return "empty";
-}
-
 export function AssistantAnswerRenderer({
   message,
   runtimeState,
-  generating,
+  generationState,
   shouldRenderStreamingText,
   keepReasoningExpanded,
   className,
@@ -89,7 +46,7 @@ export function AssistantAnswerRenderer({
 }: {
   message: Message;
   runtimeState: ChatMessageRuntimeState;
-  generating: boolean;
+  generationState: AssistantGenerationState;
   shouldRenderStreamingText: boolean;
   keepReasoningExpanded: boolean;
   className?: string;
@@ -102,8 +59,7 @@ export function AssistantAnswerRenderer({
   inlineActivity?: ReactNode;
   t: (key: string, params?: Record<string, string>) => string;
 }) {
-  const renderState = resolveAnswerRenderState({ generating, runtimeState, shouldRenderStreamingText });
-  const generationPhase = resolveGenerationPhase({ generating, runtimeState });
+  const renderState = resolveAssistantAnswerRenderState({ generationState, runtimeState, shouldRenderStreamingText });
 
   if (shouldRenderStreamingText) {
     const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
@@ -129,11 +85,12 @@ export function AssistantAnswerRenderer({
           messageId={message.id}
           content={runtimeState.content || ""}
           reasoningContent={runtimeState.reasoningContent || undefined}
-          isStreaming={generating}
+          isStreaming={generationState.isGenerating}
+          isGenerating={generationState.isGenerating}
           preferCanonicalContent={runtimeState.terminalSource === "message"}
           className="text-[15px] leading-relaxed text-text-primary"
           onOpenActivity={onOpenActivity}
-          runtimePhase={generationPhase}
+          runtimePhase={generationState.visualPhase}
         />
       </div>
     );

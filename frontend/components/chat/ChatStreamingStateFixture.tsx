@@ -190,7 +190,7 @@ export default function ChatStreamingStateFixture() {
   const marker = useMemo(() => JSON.stringify({ phase, loading }), [phase, loading]);
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-surface text-text-primary" data-testid="chat-streaming-state-fixture" data-state={marker}>
+    <div className="flex h-screen min-h-0 w-full min-w-0 flex-1 flex-col bg-surface text-text-primary" data-testid="chat-streaming-state-fixture" data-state={marker}>
       <div className="shrink-0 border-b border-surface-border px-4 py-2 text-xs text-text-secondary">
         streaming state fixture · phase=<span data-testid="fixture-phase">{phase}</span>
       </div>

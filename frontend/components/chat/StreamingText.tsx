@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useMessageRealtime } from "@/hooks/useMessageRealtime";
@@ -7,11 +8,27 @@ import { useMessageStream } from "@/hooks/useMessageStream";
 import { useSmoothStreaming } from "@/hooks/useSmoothStreaming";
 import StreamingMarkdownView from "./StreamingMarkdownView";
 import { formatElapsedTime } from "@/lib/chatGenerationPhase";
-import AssistantPendingShell from "./AssistantPendingShell";
-import AssistantGenerationFrame, { type AssistantGenerationPhase } from "./AssistantGenerationFrame";
+import AssistantGenerationFrame from "./AssistantGenerationFrame";
+import { ACTIVE_GENERATION_STATUS_SLOT_INNER_CLASS, ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT, type AssistantGenerationPhase } from "@/lib/chatGenerationState";
 
 function StreamingCursor() {
   return <span className="inline-block w-[2px] h-[1.2em] bg-brand ml-0.5 animate-cursor-blink align-middle" />;
+}
+
+function PendingStatusDot() {
+  return (
+    <span
+      className="inline-flex h-3.5 w-3.5 shrink-0 animate-pulse rounded-full"
+      style={{
+        backgroundColor: "color-mix(in srgb, var(--text-secondary) 60%, var(--text-primary) 40%)",
+        boxShadow: "0 0 12px color-mix(in srgb, var(--text-secondary) 38%, transparent)",
+      }}
+      data-chat-pending-shell="true"
+      data-chat-pending-compact="true"
+      data-chat-pending-dot-core="true"
+      aria-label="正在生成"
+    />
+  );
 }
 
 function parseThinkContent(content: string): { reasoning: string | null; answer: string; isThinking: boolean } {
@@ -51,6 +68,10 @@ function generationElapsedMs(realtime: ReturnType<typeof useMessageRealtime>) {
   return start ? Math.max(0, end - start) : 0;
 }
 
+function nowMs() {
+  return Date.now();
+}
+
 export function StreamingText({
   messageId,
   content,
@@ -61,6 +82,7 @@ export function StreamingText({
   as = "div",
   onOpenActivity,
   runtimePhase,
+  isGenerating = isStreaming,
 }: {
   messageId: string;
   content: string;
@@ -71,6 +93,7 @@ export function StreamingText({
   as?: "div" | "span";
   onOpenActivity?: () => void;
   runtimePhase?: AssistantGenerationPhase;
+  isGenerating?: boolean;
 }) {
   const { t } = useI18n();
   const realtime = useMessageRealtime(messageId);
@@ -97,8 +120,7 @@ export function StreamingText({
     : legacyParsed;
   const shouldAnimateText = isStreaming && !hasThinkTag && !hasSplitRealtime;
   const shouldAnimateSplit = isStreaming && (hasThinkTag || hasSplitRealtime);
-  const isFinalizingRealtime = !isStreaming && !!realtime?.completedAt;
-  const stableMarkdownStreamingMode = isStreaming || isFinalizingRealtime;
+  const stableMarkdownStreamingMode = isStreaming;
   const displayedText = useSmoothStreaming(effectiveText, shouldAnimateText, `${messageId}:full`, { immediateWhenStopped: preferCanonicalContent });
   const displayedReasoning = useSmoothStreaming(fullParsed.reasoning || "", shouldAnimateSplit, `${messageId}:reasoning`, { immediateWhenStopped: preferCanonicalContent });
   const displayedAnswer = useSmoothStreaming(fullParsed.answer, shouldAnimateSplit, `${messageId}:answer`, { immediateWhenStopped: preferCanonicalContent });
@@ -115,27 +137,46 @@ export function StreamingText({
   const hasReason = !!parsed.reasoning;
   const hasContent = !!parsed.answer.trim();
   const Host = as;
-  const elapsedLabel = hasReason ? formatElapsedTime(generationElapsedMs(realtime), t) : "";
-  const showInitialReasoningStatus = isStreaming && !rawHasContent && !rawHasReason;
-  const reasoningLabel = isStreaming && parsed.isThinking ? "思考中" : "已思考";
-  const localGenerationPhase: AssistantGenerationPhase = showInitialReasoningStatus
-    ? "pending"
-    : (rawHasContent || realtime?.phase === "streaming_answer" || realtime?.phase === "generating") && isStreaming
-      ? "answering"
-      : (rawHasReason || realtime?.isReasoning || realtime?.phase === "reasoning" || realtime?.phase === "thinking") && isStreaming
-        ? "reasoning"
-        : rawHasContent || rawHasReason || hasContent || hasReason
-          ? "completed"
-          : "empty";
-  const generationPhase: AssistantGenerationPhase = runtimePhase && runtimePhase !== "pending"
+  const showInitialReasoningStatus = isGenerating && !rawHasContent && !rawHasReason;
+  const generationPhase: AssistantGenerationPhase = runtimePhase && runtimePhase !== "empty"
     ? runtimePhase
-    : localGenerationPhase;
+    : (showInitialReasoningStatus
+      ? "pending"
+      : isGenerating && (rawHasContent || realtime?.phase === "streaming_answer")
+        ? "answering"
+        : isGenerating && (rawHasReason || realtime?.isReasoning || realtime?.phase === "reasoning" || realtime?.phase === "thinking")
+          ? "reasoning"
+          : rawHasContent || rawHasReason || hasContent || hasReason
+            ? "completed"
+            : "empty");
+  const showReasoningStatus = hasReason || ((generationPhase === "reasoning" || generationPhase === "answering") && !hasContent);
+  const showPendingStatus = !showReasoningStatus
+    && (generationPhase === "pending" || (isGenerating && !hasContent && !hasReason && generationPhase !== "reasoning" && generationPhase !== "answering"))
+    && !hasContent
+    && !hasReason;
+  const visiblePhaseRef = useRef<{ phase: AssistantGenerationPhase; startedAt: number }>({ phase: generationPhase, startedAt: nowMs() });
+  if (visiblePhaseRef.current.phase !== generationPhase) {
+    visiblePhaseRef.current = { phase: generationPhase, startedAt: nowMs() };
+  }
+  const [elapsedNow, setElapsedNow] = useState(() => nowMs());
+  useEffect(() => {
+    if (!showReasoningStatus || !isGenerating) return;
+    const timer = window.setInterval(() => setElapsedNow(nowMs()), 250);
+    return () => window.clearInterval(timer);
+  }, [isGenerating, messageId, showReasoningStatus]);
+  const visibleElapsedMs = Math.max(0, elapsedNow - visiblePhaseRef.current.startedAt);
+  const elapsedLabel = showReasoningStatus
+    ? isGenerating
+      ? visibleElapsedMs >= 1000 ? formatElapsedTime(visibleElapsedMs, t) : ""
+      : hasReason ? formatElapsedTime(generationElapsedMs(realtime), t) : ""
+    : "";
+  const reasoningLabel = isStreaming && (parsed.isThinking || generationPhase === "reasoning") ? "思考中" : "已思考";
 
   return (
     <Host className={className}>
       <AssistantGenerationFrame phase={generationPhase}>
-        {hasReason && (
-          <div className="mb-2" data-chat-stream-reasoning-slot="true">
+        {showReasoningStatus && (
+          <div className={ACTIVE_GENERATION_STATUS_SLOT_INNER_CLASS} style={{ minHeight: ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT }} data-chat-stream-reasoning-slot="true">
             <button
               type="button"
               aria-expanded={false}
@@ -162,23 +203,23 @@ export function StreamingText({
             <StreamingMarkdownView content={parsed.answer} idleTimeout={80} keepRenderedOnContentChange={!preferCanonicalContent} isStreaming={stableMarkdownStreamingMode} />
           </span>
         )}
-        {showInitialReasoningStatus && (
-          <div className="mb-2 flex items-start" data-chat-initial-reasoning-status="true" data-chat-stream-reasoning-slot="true">
+        {showPendingStatus && (
+          <div className={ACTIVE_GENERATION_STATUS_SLOT_INNER_CLASS} style={{ minHeight: ACTIVE_GENERATION_STATUS_SLOT_MIN_HEIGHT }} data-chat-initial-reasoning-status="true" data-chat-stream-reasoning-slot="true">
             <button
               type="button"
               aria-expanded={false}
               onClick={() => onOpenActivity?.()}
-              className="inline-flex max-w-full items-center rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left text-text-tertiary transition-colors hover:bg-surface-card/45 hover:text-text-secondary"
             >
-              <AssistantPendingShell compact />
+              <PendingStatusDot />
             </button>
           </div>
         )}
-        {!hasContent && !hasReason && !showInitialReasoningStatus && (
+        {!hasContent && !hasReason && !showPendingStatus && !showReasoningStatus && (
           <span className="block h-0 overflow-hidden" data-chat-empty-streaming-placeholder="true" aria-hidden="true" />
         )}
       </AssistantGenerationFrame>
-      {isStreaming && (hasContent || hasReason) && <StreamingCursor />}
+      {generationPhase === "answering" && hasContent && <StreamingCursor />}
     </Host>
   );
 }

@@ -155,7 +155,7 @@ export function AssistantMessageMeta({ msg, isStreaming, model, compact = false,
   const visibleStatuses = inlineStatus ? [] : statuses;
 
   return (
-    <div className={cn("relative flex items-center gap-2", inlineStatus ? "justify-start" : "justify-between", compact ? "mb-0" : "mb-2")} onMouseLeave={() => setActiveStatusKey(null)}>
+    <div className={cn("relative flex items-center gap-2", inlineStatus ? "justify-start mb-0" : "justify-between", !inlineStatus && (compact ? "mb-0" : "mb-2"))} onMouseLeave={() => setActiveStatusKey(null)}>
       <div className="flex min-w-0 items-center">
         <span className="truncate text-[11px] text-text-tertiary">{model.name}</span>
       </div>
