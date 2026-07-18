@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 function passwordFromCodes() {
   const codes = env('TESTNET_PASSWORD_CODES');
@@ -22,7 +22,7 @@ async function jsonFetch(url, options = {}) {
 
 async function streamTaskToDone({ baseUrl, token, taskId }) {
   const res = await fetch(`${baseUrl}/api/tasks/${taskId}/stream?after=0`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...authHeaders(token) },
   });
   if (!res.ok || !res.body) throw new Error(`stream task ${taskId} ${res.status}: ${await res.text()}`);
   const reader = res.body.getReader();
@@ -60,7 +60,7 @@ async function streamTaskToDone({ baseUrl, token, taskId }) {
 }
 
 async function createCompareConversation({ baseUrl, token, models, prompt }) {
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const headers = { 'Content-Type': 'application/json', ...authHeaders(token) };
   const conversation = await jsonFetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
     headers,
@@ -176,12 +176,12 @@ async function inspectActivity(page) {
   const prompt = env('COMPARE_ACTIVITY_PROMPT', '请用中文简短分析 AI 产品新闻的背景、影响、风险。请保留思考过程，最后给一句总结。');
   const expectSources = env('COMPARE_ACTIVITY_SEARCH', '0') === '1';
   const auth = await login({ baseUrl, email, password });
-  const created = await createCompareConversation({ baseUrl, token: auth.token, models, prompt });
+  const created = await createCompareConversation({ baseUrl, auth, models, prompt });
   let cleanup;
 
   const { browser, page } = await openAuthedPage({
     baseUrl,
-    token: auth.token,
+    auth,
     user: auth.user,
     sessionToken: auth.sessionToken,
     refreshToken: auth.refreshToken,
@@ -209,7 +209,7 @@ async function inspectActivity(page) {
     split = await inspectActivity(page);
   } finally {
     await browser.close().catch(() => {});
-    cleanup = await cleanupConversations({ baseUrl, token: auth.token, conversationIds: [created.conversation.id] });
+    cleanup = await cleanupConversations({ baseUrl, auth, conversationIds: [created.conversation.id] });
   }
 
   const result = {

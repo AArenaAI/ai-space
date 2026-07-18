@@ -97,7 +97,7 @@ func (h *ChatBootstrapHandler) Get(c *gin.Context) {
 }
 
 func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
-	userID, refreshedToken, ok := h.resolveBootstrapUser(c)
+	userID, _, ok := h.resolveBootstrapUser(c)
 	if !ok {
 		return nil, http.StatusInternalServerError, false
 	}
@@ -149,7 +149,6 @@ func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
 		"http_status": http.StatusOK,
 		"server_time": time.Now().UTC().Format(time.RFC3339Nano),
 		"user":        authUserPayload(user, defaultWorkspaceID),
-		"token":       refreshedToken,
 		"workspace": gin.H{
 			"current_id": workspaceID,
 			"default_id": defaultWorkspaceID,
@@ -170,10 +169,6 @@ func (h *ChatBootstrapHandler) BuildPayload(c *gin.Context) (gin.H, int, bool) {
 			"local_background_chat_task": true,
 		},
 	}
-	if refreshedToken == "" {
-		delete(payload, "token")
-	}
-
 	if conversationID > 0 {
 		payload["requested_conversation_id"] = conversationID
 		meta, snapshot, ok := h.buildConversationBootstrap(c, userID, conversationID)

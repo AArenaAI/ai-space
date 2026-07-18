@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 async function apiJson(url, token, init = {}) {
   const res = await fetch(url, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -24,14 +24,14 @@ function parseSseDataChunk(raw) {
   return raw.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
 }
 
-async function startGeneration({ baseUrl, token, conversationId, model }) {
+async function startGeneration({ baseUrl, token, auth, conversationId, model }) {
   const prompt = env(
     'STOP_BUTTON_PROMPT',
     '请写一篇中文长文，分 18 段解释聊天界面多次切换会话时为什么停止按钮容易出现竞态。每段不少于 90 字。'
   );
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(auth || token) },
     body: JSON.stringify({
       model,
       conversation_id: conversationId,
@@ -109,11 +109,11 @@ function hasSubmit(buttons) {
   const switchDelayMs = Number(env('STOP_BUTTON_SWITCH_DELAY_MS', '350'));
   const auth = await login({ baseUrl: apiBaseUrl });
   const stamp = Date.now();
-  const convA = await createConversation(apiBaseUrl, auth.token, `Multi Switch A ${stamp}`, model);
-  const convB = await createConversation(apiBaseUrl, auth.token, `Multi Switch B ${stamp}`, model);
-  const generation = await startGeneration({ baseUrl: apiBaseUrl, token: auth.token, conversationId: convA.id, model });
+  const convA = await createConversation(apiBaseUrl, auth, `Multi Switch A ${stamp}`, model);
+  const convB = await createConversation(apiBaseUrl, auth, `Multi Switch B ${stamp}`, model);
+  const generation = await startGeneration({ baseUrl: apiBaseUrl, auth, conversationId: convA.id, model });
 
-  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { console: [], errors: [], responses: [], requestfailed: [] };
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 300)));
@@ -136,7 +136,7 @@ function hasSubmit(buttons) {
   let activeCount = -1;
   let lastStatus = null;
   while (Date.now() < deadline) {
-    const boot = await apiJson(`${apiBaseUrl}/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
+    const boot = await apiJson(`${apiBaseUrl}/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth);
     const active = boot?.active_tasks?.chat || [];
     activeCount = active.length;
     const matching = active.find((item) => Number(item.id) === Number(generation.task.id));

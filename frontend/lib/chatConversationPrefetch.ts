@@ -70,7 +70,7 @@ export async function prefetchConversationSnapshot({
   fetchCount?: typeof fetchConversationMessageCount;
   fetchBootstrap?: typeof fetchChatBootstrap;
 }): Promise<boolean> {
-  if (!token || !Number.isFinite(conversationId)) return false;
+  if (!Number.isFinite(conversationId)) return false;
   if (!force && hasConversationSnapshot(conversationId)) return true;
 
   const existing = inFlightPrefetches.get(conversationId);
@@ -81,15 +81,21 @@ export async function prefetchConversationSnapshot({
     let data: ConversationRestoreResponse;
     let totalMessages: number | undefined;
     try {
+      const authToken = token || undefined;
       if (fetchRestore === fetchConversationRestore && fetchBootstrap === fetchChatBootstrap) {
-        const bootstrap = await fetchBootstrap({ apiBaseUrl, conversationId, token, messageTail: prefetchTail, signal });
+        const bootstrap = await fetchBootstrap({ apiBaseUrl, conversationId, token: authToken, messageTail: prefetchTail, signal });
         data = mapBootstrapPayloadToRestoreResponse(bootstrap);
       } else {
-        data = await fetchRestore({ apiBaseUrl, conversationId, token, signal });
+        const requiredToken = token || "";
+        if (!requiredToken) return false;
+        data = await fetchRestore({ apiBaseUrl, conversationId, token: requiredToken, signal });
       }
+      const countToken = token || "";
       totalMessages = typeof data.total === "number"
         ? data.total
-        : await fetchCount({ apiBaseUrl, conversationId, token, signal }).catch(() => undefined);
+        : countToken
+          ? await fetchCount({ apiBaseUrl, conversationId, token: countToken, signal }).catch(() => undefined)
+          : undefined;
     } catch (error: any) {
       if (signal?.aborted || error?.name === "AbortError") return false;
       return false;

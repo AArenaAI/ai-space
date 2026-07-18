@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { env, login, printResult } = require('./chat-live-utils.cjs');
+const { addAuthCookies, authHeaders, env, login, printResult } = require('./chat-live-utils.cjs');
 
 const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
 const prompt = env('FINAL_RENDER_PROMPT', [
@@ -9,14 +9,17 @@ const prompt = env('FINAL_RENDER_PROMPT', [
   '不要解释，不要标题，不要 Markdown 表格，不要额外文字。',
 ].join('\n'));
 
-async function openAuthedPage(token, user) {
+async function openAuthedPage(auth, user) {
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await addAuthCookies(context, { baseUrl, auth });
+  const page = await context.newPage();
+  await page.addInitScript(({ user }) => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin_token');
     localStorage.setItem('user', JSON.stringify(user));
     if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
-  }, { token, user });
+  }, { user });
   return { browser, page };
 }
 
@@ -67,10 +70,8 @@ async function waitForDone(page, timeout = 180000) {
 
 (async () => {
   const auth = await login();
-  const token = auth.token || auth.access_token;
-  const user = auth.user || auth;
-  if (!token) throw new Error('login did not return token');
-  const { browser, page } = await openAuthedPage(token, user);
+  const user = auth.user || {};
+  const { browser, page } = await openAuthedPage(auth, user);
   const consoleEvents = [];
   const pageErrors = [];
   const requestfailed = [];

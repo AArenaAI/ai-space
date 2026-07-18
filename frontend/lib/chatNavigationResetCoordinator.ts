@@ -118,5 +118,5 @@ export function shouldContinueConversationRestore(input: {
   token?: string | null;
   loadAborted: boolean;
 }): boolean {
-  return Boolean(input.token) && !input.loadAborted;
+  return !input.loadAborted;
 }

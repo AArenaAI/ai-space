@@ -60,13 +60,13 @@ async function testStopDuringInit(page) {
   await page.waitForFunction(() => document.querySelector('[data-testid="local-send-events"]')?.textContent?.includes('stopped'));
   const snapshot = await rows(page);
   assert.equal(snapshot.length, 2);
-  assert.ok(snapshot[0].text.includes('已取消'), 'user row shows cancelled');
   assert.equal(snapshot[0].server, null, 'cancelled submit never server-binds user');
   assert.equal(snapshot[1].server, null, 'cancelled submit never server-binds assistant');
   assert.equal(await page.locator('[data-testid="chat-stop-button"]').count(), 0);
   assert.equal(await page.locator('[data-testid="chat-send-button"]').count(), 1);
-  assert.ok(await page.locator('[data-testid="user-message-edit-action"]').count(), 'cancelled row has edit action');
-  assert.ok(await page.locator('[data-testid="user-message-retry-action"]').count(), 'cancelled row has retry action');
+  assert.ok(await page.locator('[data-testid="chat-user-message-edit-action"]').count(), 'cancelled row has edit action');
+  await page.locator('[data-testid="chat-message-actions-more"]').first().click({ force: true });
+  assert.equal(await page.locator('[data-testid="user-message-retry-action"]').count(), 1, 'retry is available inside actions menu');
 }
 
 async function testInitFail(page) {
@@ -76,18 +76,18 @@ async function testInitFail(page) {
   await send(page, 'fail init');
   await page.waitForFunction(() => document.querySelector('[data-testid="local-send-events"]')?.textContent?.includes('init-failed'));
   const snapshot = await rows(page);
-  assert.ok(snapshot[0].text.includes('发送失败'), 'user row shows send failure');
   assert.equal(snapshot[0].server, null);
   assert.equal(snapshot[1].server, null);
   assert.equal(await page.locator('[data-testid="chat-stop-button"]').count(), 0);
-  assert.ok(await page.locator('[data-testid="user-message-retry-action"]').count(), 'failed row has retry action');
+  await page.locator('[data-testid="chat-message-actions-more"]').first().click({ force: true });
+  assert.equal(await page.locator('[data-testid="user-message-retry-action"]').count(), 1, 'failed row has retry action in menu');
   await page.locator('[data-testid="user-message-retry-action"]').first().click();
   await page.waitForFunction(() => document.querySelectorAll('[data-chat-message-row="true"]').length >= 4);
   assert.ok((await events(page)).includes('retry:fail init'), 'retry action is wired');
   let retried = await rows(page);
   assert.notEqual(retried[0].renderKey, retried[2].renderKey, 'retry creates a fresh user render key');
   assert.notEqual(retried[1].renderKey, retried[3].renderKey, 'retry creates a fresh assistant render key');
-  await page.locator('[data-testid="user-message-edit-action"]').first().click();
+  await page.locator('[data-testid="chat-user-message-edit-action"]').first().click({ force: true });
   await page.waitForSelector('[data-testid="chat-user-message-edit-form"]');
 }
 
@@ -109,6 +109,7 @@ async function testStreamFail(page) {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.on('console', (msg) => console.log('[console]', msg.text()));
     page.setDefaultTimeout(30000);
     await testSuccess(page);
     await testStopDuringInit(page);

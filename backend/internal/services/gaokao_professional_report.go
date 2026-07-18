@@ -143,10 +143,16 @@ func buildGaokaoProfessionalReportItem(profile GaokaoProfile, rec GaokaoRecommen
 }
 
 func canonicalGaokaoSchoolLevel(school, dualClass, level, t string) string {
+	isCollegeMajor := strings.Contains(level, "专科") || strings.Contains(level, "高职") || strings.Contains(t, "专科") || strings.Contains(t, "高职")
+	isVocationalCollege := strings.Contains(school, "职业技术学院") || strings.Contains(school, "高等专科学校") || strings.Contains(school, "高等职业") || strings.Contains(school, "职业学院")
+	isVocationalUndergrad := strings.Contains(school, "职业") && strings.Contains(school, "技术大学")
+	if isCollegeMajor && !isVocationalCollege && !isVocationalUndergrad {
+		return "本科院校专科专业"
+	}
 	if strings.Contains(dualClass, "985") || strings.Contains(dualClass, "211") || strings.Contains(dualClass, "双一流") {
 		return dualClass
 	}
-	if strings.Contains(school, "职业") && strings.Contains(school, "技术大学") {
+	if isVocationalUndergrad {
 		return "职业本科"
 	}
 	knownPrivate := []string{"文达信息工程", "新华学院", "三联学院", "安徽信息工程", "皖江工学院", "外国语学院", "商学院", "金融学院", "科技学院", "理工学院", "江淮学院", "滨江学院", "皖南医学院"}
@@ -236,7 +242,7 @@ func adviceGaokaoReport(band string, gap int) string {
 
 func formatGaokaoRank(rank int) string {
 	if rank <= 0 {
-		return "待核验"
+		return "暂无明确数据"
 	}
 	return fmt.Sprintf("约%d", rank)
 }

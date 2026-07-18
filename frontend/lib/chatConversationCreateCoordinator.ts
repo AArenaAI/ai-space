@@ -37,7 +37,7 @@ export function buildCreateConversationUrl(apiBaseUrl: string): string {
 
 export async function runCreateConversationRequest(input: {
   apiBaseUrl: string;
-  token: string;
+  token?: string | null;
   body: CreateConversationBody;
   fetchImpl?: typeof fetch;
 }): Promise<CreatedConversationResponse | undefined> {
@@ -49,7 +49,7 @@ export async function runCreateConversationRequest(input: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${input.token}`,
+      ...(input.token ? { Authorization: `Bearer ${input.token}` } : {}),
     },
     body: JSON.stringify(input.body),
   };
@@ -85,5 +85,5 @@ export function buildCreatedConversationUrl(input: {
 export function shouldCreateConversation(input: {
   token?: string | null;
 }): boolean {
-  return Boolean(input.token);
+  return true;
 }

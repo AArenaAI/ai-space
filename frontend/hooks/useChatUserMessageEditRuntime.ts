@@ -13,6 +13,7 @@ import { initializeAssistantRealtime } from "@/lib/chatInitialRealtime";
 import type { ChatModel, Message } from "@/lib/chatTypes";
 import type { ChatStreamRunResult } from "@/lib/chatStreamRunResult";
 import { chatRuntimeStore } from "@/lib/chatRuntime";
+import { inferGroups } from "@/lib/groups";
 import { getGuestId } from "@/lib/guestId";
 
 type StreamResponse = (
@@ -21,6 +22,14 @@ type StreamResponse = (
   controller: AbortController,
   convId?: number,
 ) => Promise<ChatStreamRunResult | undefined>;
+
+type RerunCompareForEditedUserMessage = (input: {
+  editedMessage: Message;
+  baseMessages: Message[];
+  groupId: number;
+  groupModels: string[];
+  content: string;
+}) => Promise<void>;
 
 type EditUserMessageOptions = {
   apiBaseUrl: string;
@@ -44,6 +53,7 @@ type EditUserMessageOptions = {
   now?: () => number;
   createId?: () => string;
   dispatchWindowEvent?: (event: Event) => void;
+  rerunCompareForEditedUserMessage?: RerunCompareForEditedUserMessage;
 };
 
 type EditResponse = {
@@ -52,20 +62,37 @@ type EditResponse = {
   updated_at?: string;
 };
 
+function getRuntimeMessageKeys(message: Message): string[] {
+  const keys: string[] = [];
+  if (message.id) keys.push(`id:${message.id}`);
+  if (message.serverMessageId) keys.push(`server:${message.serverMessageId}`);
+  if (message.generationTaskId) keys.push(`task:${message.generationTaskId}`);
+  return keys;
+}
+
+function filterPendingMessagesAlreadyInTimeline(messages: Message[], pendingOptimisticMessages: Message[] = []) {
+  if (pendingOptimisticMessages.length === 0) return [];
+  const timelineKeys = new Set(messages.flatMap(getRuntimeMessageKeys));
+  return pendingOptimisticMessages.filter((message) => !getRuntimeMessageKeys(message).some((key) => timelineKeys.has(key)));
+}
+
 function syncEditedMessagesToRuntime(conversationId: number | undefined, messages: Message[], pendingOptimisticMessages: Message[] = []) {
   if (!conversationId) return;
   chatRuntimeStore.patchConversation(conversationId, {
     messages,
-    pendingOptimisticMessages,
+    pendingOptimisticMessages: filterPendingMessagesAlreadyInTimeline(messages, pendingOptimisticMessages),
     updatedAt: Date.now(),
   });
 }
 
-function buildPendingLocalAssistantMessages(pendingLocalAssistantsRef: MutableRefObject<Record<string, { convId?: number; message: Message }>> | undefined, conversationId: number | undefined) {
+function buildPendingLocalAssistantMessages(pendingLocalAssistantsRef: MutableRefObject<Record<string, { convId?: number; message: Message }>> | undefined, conversationId: number | undefined, timelineMessages: Message[] = []) {
   if (!pendingLocalAssistantsRef || !conversationId) return [];
-  return Object.values(pendingLocalAssistantsRef.current)
-    .filter((entry) => entry.convId === conversationId)
-    .map((entry) => entry.message);
+  return filterPendingMessagesAlreadyInTimeline(
+    timelineMessages,
+    Object.values(pendingLocalAssistantsRef.current)
+      .filter((entry) => entry.convId === conversationId)
+      .map((entry) => entry.message)
+  );
 }
 
 export function useChatUserMessageEditRuntime({
@@ -90,14 +117,23 @@ export function useChatUserMessageEditRuntime({
   now = Date.now,
   createId = uuidv4,
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
+  rerunCompareForEditedUserMessage,
 }: EditUserMessageOptions) {
   return useCallback(async (message: Message, nextContent: string) => {
     const content = nextContent.trim();
     if (!content) throw new Error("消息内容不能为空");
-    if (isCompare) throw new Error("对比模式暂不支持编辑历史问题");
     if (isLoading) throw new Error("当前会话仍在生成中，请先停止后再编辑");
     if (!currentConversation || !message.serverMessageId || message.role !== "user") {
       throw new Error("当前消息暂不支持编辑");
+    }
+    const compareGroup = isCompare
+      ? inferGroups(messages).find((group) => String(group.userMessage.id) === String(message.id) || group.userMessage.serverMessageId === message.serverMessageId)
+      : undefined;
+    if (isCompare) {
+      if (!rerunCompareForEditedUserMessage) throw new Error("对比模式编辑重跑链路未就绪");
+      if (!compareGroup || compareGroup.id <= 0 || compareGroup.models.length < 2) {
+        throw new Error("当前对比消息缺少组信息，无法编辑重跑");
+      }
     }
 
     const response = await apiFetch(`/conversations/${currentConversation}/messages/${message.serverMessageId}`, {
@@ -123,6 +159,17 @@ export function useChatUserMessageEditRuntime({
       ...messages.slice(0, editedIndex),
       editedMessage,
     ];
+    if (isCompare && compareGroup && rerunCompareForEditedUserMessage) {
+      syncEditedMessagesToRuntime(currentConversation, truncatedMessages);
+      await rerunCompareForEditedUserMessage({
+        editedMessage,
+        baseMessages: truncatedMessages,
+        groupId: compareGroup.id,
+        groupModels: compareGroup.models,
+        content,
+      });
+      return;
+    }
     const localAssistant = createAssistantChatMessage({
       id: createId(),
       model: selectedModel.id,
@@ -186,7 +233,7 @@ export function useChatUserMessageEditRuntime({
       syncEditedMessagesToRuntime(currentConversation, serverMessages, [serverAssistant]);
       if (pendingLocalAssistantsRef) {
         pendingLocalAssistantsRef.current[serverAssistant.id] = { convId: currentConversation, message: serverAssistant };
-        syncEditedMessagesToRuntime(currentConversation, serverMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation));
+        syncEditedMessagesToRuntime(currentConversation, serverMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation, serverMessages));
       }
       const streamRes = await fetch(`${apiBaseUrl}/api/tasks/${initResult.task_id}/stream?after=0`, {
         headers,
@@ -218,7 +265,8 @@ export function useChatUserMessageEditRuntime({
           setIsLoading(false);
           abortControllerRef.current = null;
           abortReasonRef.current = null;
-          syncEditedMessagesToRuntime(currentConversation, chatRuntimeStore.getConversation(currentConversation).messages as Message[], buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation));
+          const runtimeMessages = chatRuntimeStore.getConversation(currentConversation).messages as Message[];
+          syncEditedMessagesToRuntime(currentConversation, runtimeMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation, runtimeMessages));
         });
     } catch (error) {
       setMessages((prev) => prev.map((item) => item.id === activeAssistantId || item.id === localAssistant.id ? {
@@ -234,8 +282,9 @@ export function useChatUserMessageEditRuntime({
       setIsLoading(false);
       abortControllerRef.current = null;
       abortReasonRef.current = null;
-      syncEditedMessagesToRuntime(currentConversation, chatRuntimeStore.getConversation(currentConversation).messages as Message[], buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation));
+      const runtimeMessages = chatRuntimeStore.getConversation(currentConversation).messages as Message[];
+      syncEditedMessagesToRuntime(currentConversation, runtimeMessages, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, currentConversation, runtimeMessages));
       throw error;
     }
-  }, [abortControllerRef, abortReasonRef, apiBaseUrl, createId, currentConversation, dispatchWindowEvent, isCompare, isLoading, messages, notebookFileIds, notebookId, now, pendingLocalAssistantsRef, reasoning, search, selectedModel.id, setIsLoading, setMessages, skillKey, streamResponse, translate]);
+  }, [abortControllerRef, abortReasonRef, apiBaseUrl, createId, currentConversation, dispatchWindowEvent, isCompare, isLoading, messages, notebookFileIds, notebookId, now, pendingLocalAssistantsRef, reasoning, rerunCompareForEditedUserMessage, search, selectedModel.id, setIsLoading, setMessages, skillKey, streamResponse, translate]);
 }

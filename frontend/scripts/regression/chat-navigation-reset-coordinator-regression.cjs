@@ -129,9 +129,9 @@ test("existing conversation requests direct SSE navigation aborts and history lo
   });
 });
 
-test("shouldContinueConversationRestore requires token and non-aborted load", () => {
+test("shouldContinueConversationRestore only requires a non-aborted load", () => {
   assert.equal(shouldContinueConversationRestore({ token: "abc", loadAborted: false }), true);
-  assert.equal(shouldContinueConversationRestore({ token: "", loadAborted: false }), false);
+  assert.equal(shouldContinueConversationRestore({ token: "", loadAborted: false }), true);
   assert.equal(shouldContinueConversationRestore({ token: "abc", loadAborted: true }), false);
 });
 

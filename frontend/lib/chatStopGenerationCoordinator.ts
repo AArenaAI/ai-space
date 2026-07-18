@@ -79,6 +79,7 @@ export function cancelGenerationTask({
   return fetchImpl(buildCancelGenerationTaskUrl({ apiBaseUrl, taskId }), {
     method: "POST",
     headers,
+    keepalive: true,
   }).catch(() => undefined);
 }
 

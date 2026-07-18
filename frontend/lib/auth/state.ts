@@ -30,9 +30,7 @@ function safeParseUser(raw: string | null): AuthSessionUser | null {
 
 function hasLocalAuthSnapshot() {
   return Boolean(
-    localStorage.getItem("token") ||
-      localStorage.getItem("user") ||
-      localStorage.getItem("admin_token") ||
+    localStorage.getItem("user") ||
       localStorage.getItem("admin_user")
   );
 }
@@ -43,10 +41,9 @@ export function readAuthState(): AuthStateSnapshot {
   }
   const localUser = safeParseUser(localStorage.getItem("user"));
   const user = currentSession?.user || localUser;
-  const token = currentSession?.token || localStorage.getItem("token");
   return {
     status: sessionProbeFinished ? (user ? "authenticated" : "anonymous") : "loading",
-    token: token || null,
+    token: null,
     user,
     isAdmin: user?.role === "admin",
   };
@@ -58,8 +55,8 @@ function dispatchAuthEvents() {
 }
 
 export function storeAdminAuthSnapshot(token: string | null | undefined, user: AuthSessionUser | null | undefined) {
-  if (!token || user?.role !== "admin") return;
-  localStorage.setItem("admin_token", token);
+  if (user?.role !== "admin") return;
+  localStorage.removeItem("admin_token");
   localStorage.setItem("admin_user", JSON.stringify(user));
   window.dispatchEvent(new Event("admin-auth-changed"));
 }
@@ -73,7 +70,7 @@ export function clearAdminAuthSnapshot() {
 export function applyAuthSession(session: AuthSessionSnapshot) {
   currentSession = session;
   storeAuthUserSnapshot(session);
-  storeAdminAuthSnapshot(session.token, session.user);
+  storeAdminAuthSnapshot(null, session.user);
   clearGuestId();
   sessionProbePromise = Promise.resolve(session);
   sessionProbeFinished = true;
@@ -141,13 +138,13 @@ export function refreshBrowserSession(options: { preserveOnMissing?: boolean } =
         }
         // Rotation races can make /refresh fail while /session is still valid.
         const restored = await ensureAuthSession({ force: true, preserveOnMissing: true }).catch(() => null);
-        if (restored?.token) return restored;
+        if (restored?.user) return restored;
         if (!options.preserveOnMissing) clearBrowserAuthState();
         return null;
       })
       .catch(async () => {
         const restored = await ensureAuthSession({ force: true, preserveOnMissing: true }).catch(() => null);
-        return restored?.token ? restored : null;
+        return restored?.user ? restored : null;
       })
       .finally(() => {
         sessionRefreshPromise = null;

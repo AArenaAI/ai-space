@@ -97,7 +97,7 @@ function failResponse(body = { error: "boom", message: "失败" }) { return { ok
     assert.equal(plan.userMessage.clientMessageId, plan.userMessage.id);
     assert.equal(plan.assistantMessage.clientMessageId, plan.assistantMessage.id);
     assert.equal(plan.userMessage.localRunId, plan.assistantMessage.localRunId);
-    assert.equal(plan.userMessage.sendStatus, "submitting");
+    assert.equal(plan.userMessage.sendStatus, "local_committed");
     assert.equal(plan.assistantMessage.generationStatus, "pending");
     assert.deepEqual(plan.contextMessages.map((m) => m.id), ["old", "id-2"]);
     assert.deepEqual(applySingleSendMessagePlan(messages, plan).map((m) => m.id), ["old", "id-2", "id-3"]);

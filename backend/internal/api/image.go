@@ -1037,6 +1037,42 @@ func buildBackgroundOnlyPrompt(userPrompt string, subMode string) string {
 	}
 }
 
+func promptLikelyRequiresAccurateText(prompt string) bool {
+	p := strings.ToLower(strings.TrimSpace(prompt))
+	if p == "" {
+		return false
+	}
+	markers := []string{
+		"文字", "文本", "标题", "副标题", "标语", "口号", "海报", "封面", "招牌", "牌匾", "横幅", "logo", "icon", "字体", "字样", "写着", "写上", "显示", "caption", "poster", "banner", "headline", "slogan", "sign text", "text:",
+	}
+	for _, marker := range markers {
+		if strings.Contains(p, marker) {
+			return true
+		}
+	}
+	// Quoted text is usually intended to be rendered verbatim on the image.
+	quotePairs := [][2]string{{"“", "”"}, {"\"", "\""}, {"'", "'"}, {"《", "》"}, {"「", "」"}}
+	for _, pair := range quotePairs {
+		start := strings.Index(prompt, pair[0])
+		end := -1
+		if start >= 0 {
+			end = strings.Index(prompt[start+len(pair[0]):], pair[1])
+		}
+		if start >= 0 && end >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func strengthenImageTextPrompt(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if !promptLikelyRequiresAccurateText(prompt) {
+		return prompt
+	}
+	return prompt + "\n\nText rendering requirements: If the image contains any visible words, render ONLY the exact user-specified text. Keep text short, clean, flat, front-facing, high-contrast, and fully legible. Do not invent extra letters, pseudo-text, gibberish, watermarks, random signatures, or decorative unreadable typography. For Chinese text, each Chinese character must be correct and not deformed. If exact readable text cannot be reliably rendered, prefer leaving the area blank rather than adding distorted text."
+}
+
 // saveBase64ToImages 将 base64 数据保存到 data/images/ 目录，返回完整文件路径
 func saveBase64ToImages(b64Data string) (string, error) {
 	if err := os.MkdirAll(imageAssetsDir(), 0755); err != nil {
@@ -1142,8 +1178,9 @@ func (h *ImageHandler) GenerateImage(c *gin.Context) {
 	// 提前解析 baseURL，因为 goroutine 里 gin.Context 可能已经失效
 	baseURL := resolveBaseURL(c, h.cfg)
 
-	// 启动后台 goroutine 异步生成图片
-	go h.processImageJob(gen.ID, req.Prompt, size, quality, provider, refImagePaths, baseURL)
+	// 启动后台 goroutine 异步生成图片。记录保留用户原始 prompt；实际发送给图像模型的 prompt 可按能力做安全增强。
+	modelPrompt := strengthenImageTextPrompt(req.Prompt)
+	go h.processImageJob(gen.ID, modelPrompt, size, quality, provider, refImagePaths, baseURL)
 
 	// 立即返回，不等待实际生成
 	c.JSON(http.StatusOK, gin.H{

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"aipool-backend/internal/models"
 	"aipool-backend/internal/services"
@@ -21,10 +23,33 @@ type GaokaoHandler struct {
 	service       *services.GaokaoService
 	aiService     chatAIService
 	searchService *services.SearchService
+	usageService  *services.UsageService
 }
 
-func NewGaokaoHandler(db *gorm.DB, service *services.GaokaoService, aiService chatAIService, searchService *services.SearchService) *GaokaoHandler {
-	return &GaokaoHandler{db: db, service: service, aiService: aiService, searchService: searchService}
+type gaokaoAdvisorTask struct {
+	ID        string      `json:"id"`
+	Status    string      `json:"status"`
+	Track     string      `json:"track"`
+	Progress  int         `json:"progress"`
+	Stage     string      `json:"stage"`
+	Events    []gin.H     `json:"events"`
+	Result    interface{} `json:"result,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+var gaokaoAdvisorTasks = struct {
+	sync.RWMutex
+	items map[string]*gaokaoAdvisorTask
+}{items: map[string]*gaokaoAdvisorTask{}}
+
+func NewGaokaoHandler(db *gorm.DB, service *services.GaokaoService, aiService chatAIService, searchService *services.SearchService, usageService ...*services.UsageService) *GaokaoHandler {
+	h := &GaokaoHandler{db: db, service: service, aiService: aiService, searchService: searchService}
+	if len(usageService) > 0 {
+		h.usageService = usageService[0]
+	}
+	return h
 }
 
 type gaokaoRecommendRequest struct {
@@ -65,7 +90,7 @@ func (h *GaokaoHandler) Guide(c *gin.Context) {
 	} else if strings.Contains(mode, "专业") {
 		focus = "专业推荐：只输出专业方向建议，不要给城市推荐和综合填报方案。"
 	}
-	prompt := fmt.Sprintf(`你是高考志愿规划顾问。用户正在填写%s问卷，请基于答案联网生成专属建议。
+	prompt := fmt.Sprintf(`你是高考志愿规划顾问。用户正在填写%s问卷，请基于答案生成专属建议。
 核心边界：%s
 硬性要求：
 1. 只返回严格 JSON，不要 Markdown，不要代码块，不要链接 URL，不要 utm_source/openai 等乱码。
@@ -78,7 +103,7 @@ func (h *GaokaoHandler) Guide(c *gin.Context) {
 %s`, mode, focus, string(payload))
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 300_000_000_000)
 	defer cancel()
-	text, err := callGaokaoAITextWithSearchContext(ctx, h.aiService, h.searchService, "gpt-5.5", []services.Message{{Role: "system", Content: "你是专业高考志愿规划师，回答清晰具体。"}, {Role: "user", Content: prompt}}, true)
+	text, err := callCliproxyChatText(ctx, "gpt-5.5", []services.Message{{Role: "system", Content: "你是专业高考志愿规划师，回答清晰具体。"}, {Role: "user", Content: prompt}})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -121,6 +146,16 @@ type gaokaoAdvisorRequest struct {
 	AllowWebLookup bool                   `json:"allow_web_lookup"`
 	Model          string                 `json:"model"`
 	Track          string                 `json:"track"`
+}
+
+func (h *GaokaoHandler) usageRecorder(c *gin.Context) gaokaoReportUsageRecorder {
+	var userID uint
+	if raw, ok := c.Get("userID"); ok {
+		if v, ok := raw.(uint); ok {
+			userID = v
+		}
+	}
+	return gaokaoReportUsageRecorder{usageService: h.usageService, userID: userID, guestID: getGuestID(c), requestID: c.GetHeader("X-Request-ID")}
 }
 
 func (h *GaokaoHandler) Advisor(c *gin.Context) {
@@ -176,7 +211,16 @@ func (h *GaokaoHandler) Advisor(c *gin.Context) {
 	advisor.FinalReportMarkdown = services.BuildGaokaoFinalReportMarkdown(profile, "", advisor.ProfessionalReport, advisor.EvidenceLinks)
 	if strings.ToLower(provider) != "none" {
 		reportCtx, cancel := context.WithTimeout(c.Request.Context(), 480_000_000_000)
-		md, status, aiErr := generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		var md, status string
+		var aiErr error
+		switch {
+		case strings.EqualFold(provider, "committee_v2"):
+			md, status, aiErr = generateGaokaoReportWithMultiCandidateV2(reportCtx, h.aiService, h.searchService, h.usageRecorder(c), profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		case strings.EqualFold(provider, "committee_clip"):
+			md, status, aiErr = generateGaokaoReportWithCliproxyCommittee(reportCtx, h.aiService, h.searchService, h.usageRecorder(c), profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		default:
+			md, status, aiErr = generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, h.usageRecorder(c), profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		}
 		if aiErr == nil && strings.TrimSpace(md) != "" {
 			advisor.FinalReportMarkdown = md
 			advisor.ModelStatus = status
@@ -195,6 +239,135 @@ func (h *GaokaoHandler) Advisor(c *gin.Context) {
 		cancel()
 	}
 	c.JSON(http.StatusOK, advisor)
+}
+
+func (h *GaokaoHandler) AdvisorTaskStart(c *gin.Context) {
+	var req gaokaoAdvisorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误"})
+		return
+	}
+	id := fmt.Sprintf("gaokao-%d", time.Now().UnixNano())
+	task := &gaokaoAdvisorTask{ID: id, Status: "running", Track: strings.TrimSpace(req.Track), Progress: 8, Stage: "整理需求", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	gaokaoAdvisorTasks.Lock()
+	gaokaoAdvisorTasks.items[id] = task
+	gaokaoAdvisorTasks.Unlock()
+	go h.runAdvisorTask(id, req, h.usageRecorder(c))
+	c.JSON(http.StatusOK, gin.H{"task_id": id, "status": "running"})
+}
+
+func (h *GaokaoHandler) AdvisorTaskGet(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	gaokaoAdvisorTasks.RLock()
+	task := gaokaoAdvisorTasks.items[id]
+	gaokaoAdvisorTasks.RUnlock()
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "任务不存在或已过期"})
+		return
+	}
+	c.JSON(http.StatusOK, task)
+}
+
+func updateGaokaoAdvisorTask(id, status, stage string, progress int, event gin.H, result interface{}, errText string) {
+	gaokaoAdvisorTasks.Lock()
+	defer gaokaoAdvisorTasks.Unlock()
+	task := gaokaoAdvisorTasks.items[id]
+	if task == nil {
+		return
+	}
+	if status != "" {
+		task.Status = status
+	}
+	if stage != "" {
+		task.Stage = stage
+	}
+	if progress > task.Progress {
+		task.Progress = progress
+	}
+	if event != nil {
+		task.Events = append(task.Events, event)
+		if len(task.Events) > 30 {
+			task.Events = task.Events[len(task.Events)-30:]
+		}
+	}
+	if result != nil {
+		task.Result = result
+	}
+	if errText != "" {
+		task.Error = errText
+	}
+	task.UpdatedAt = time.Now()
+}
+
+func (h *GaokaoHandler) runAdvisorTask(id string, req gaokaoAdvisorRequest, usageRecorder gaokaoReportUsageRecorder) {
+	emit := func(stage string, progress int, text string) {
+		updateGaokaoAdvisorTask(id, "running", stage, progress, gin.H{"text": text, "at": time.Now()}, nil, "")
+	}
+	profile := services.GaokaoProfile{Province: strings.TrimSpace(req.Profile.Province), Score: req.Profile.Score, Rank: req.Profile.Rank, Subjects: strings.TrimSpace(req.Profile.Subjects), PreferredCities: cleanStringList(req.Profile.PreferredCities), PreferredMajors: cleanStringList(req.Profile.PreferredMajors), RejectedMajors: cleanStringList(req.Profile.RejectedMajors), SchoolType: strings.TrimSpace(req.Profile.SchoolType), TuitionLimit: req.Profile.TuitionLimit, AcceptCooperation: req.Profile.AcceptCooperation, ObeyAdjustment: req.Profile.ObeyAdjustment, Strategy: strings.TrimSpace(req.Profile.Strategy)}
+	if profile.Rank <= 0 {
+		updateGaokaoAdvisorTask(id, "error", "生成失败", 100, nil, nil, "请填写有效的全省位次")
+		return
+	}
+	emit("整理需求", 16, "理解档案和偏好")
+	result, err := h.service.Recommend(profile)
+	if err != nil {
+		updateGaokaoAdvisorTask(id, "error", "生成失败", 100, nil, nil, "生成 Advisor 推荐失败")
+		return
+	}
+	track := strings.TrimSpace(req.Track)
+	message := strings.TrimSpace(req.Message)
+	recommendations := services.FilterGaokaoRecommendationsByTrack(result.Recommendations, track)
+	emit("整理需求", 28, fmt.Sprintf("本地候选 %d 个", len(recommendations)))
+	advisor := services.BuildGaokaoAdvisorResponse(profile, message, recommendations)
+	if req.AllowWebLookup {
+		emit("整理需求", 36, "开始联网补查")
+		lookupCtx, cancel := context.WithTimeout(context.Background(), 30_000_000_000)
+		advisor.ExternalSourceHits = services.LookupGaokaoAdvisorSources(lookupCtx, profile, message)
+		advisor.EvidenceLinks = services.BuildGaokaoAdvisorEvidenceLinks(advisor.ExternalSourceHits)
+		advisor.ExternalCandidates = services.ExtractGaokaoAdvisorExternalCandidates(lookupCtx, profile, advisor.ExternalSourceHits)
+		advisor.ExternalCandidatePlan = services.BuildGaokaoExternalCandidatePlan(profile, advisor.ExternalCandidates)
+		advisor.ExternalCandidatePlan = services.FilterGaokaoExternalCandidatePlanByTrack(advisor.ExternalCandidatePlan, track)
+		advisor.AdvisorPlanSections = services.BuildGaokaoAdvisorPlanSectionsForTrack(profile, advisor.ExternalCandidatePlan, advisor.EvidenceLinks, track)
+		cancel()
+		emit("生成初稿", 56, "联网候选和来源已整理")
+	}
+	modelRecommendations := recommendations
+	if len(modelRecommendations) == 0 {
+		modelRecommendations = append(modelRecommendations, services.BuildGaokaoProfessionalSeedRecommendations(profile)...)
+		modelRecommendations = append(modelRecommendations, services.ExternalCandidatePlanToGaokaoRecommendations(profile, advisor.ExternalCandidatePlan)...)
+	}
+	advisor.ProfessionalReport = services.BuildGaokaoProfessionalReport(profile, modelRecommendations, advisor.EvidenceLinks)
+	advisor.FinalReportMarkdown = services.BuildGaokaoFinalReportMarkdown(profile, "", advisor.ProfessionalReport, advisor.EvidenceLinks)
+	emit("复核报告", 68, "正在生成正式报告")
+	provider := strings.TrimSpace(req.Model)
+	if provider == "" {
+		provider = "committee"
+	}
+	if strings.ToLower(provider) != "none" {
+		reportCtx, cancel := context.WithTimeout(context.Background(), 480_000_000_000)
+		var md, status string
+		var aiErr error
+		switch {
+		case strings.EqualFold(provider, "committee_v2"):
+			md, status, aiErr = generateGaokaoReportWithMultiCandidateV2(reportCtx, h.aiService, h.searchService, usageRecorder, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		case strings.EqualFold(provider, "committee_clip"):
+			md, status, aiErr = generateGaokaoReportWithCliproxyCommittee(reportCtx, h.aiService, h.searchService, usageRecorder, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		default:
+			md, status, aiErr = generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, usageRecorder, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		}
+		if aiErr == nil && strings.TrimSpace(md) != "" {
+			advisor.FinalReportMarkdown = md
+			advisor.ModelStatus = status
+			advisor.ModelNote = "后台任务已通过统一 AIService 生成终稿。"
+		} else if md, status, err := services.GenerateGaokaoFinalReportMarkdown(reportCtx, profile, message, track, modelRecommendations, advisor.EvidenceLinks); err == nil && strings.TrimSpace(md) != "" {
+			advisor.FinalReportMarkdown = md
+			advisor.ModelStatus = status
+			advisor.ModelNote = "后台任务使用旧模型终稿兜底。"
+		}
+		cancel()
+	}
+	emit("生成终稿", 96, "报告已生成")
+	updateGaokaoAdvisorTask(id, "done", "生成完成", 100, gin.H{"text": "完成", "at": time.Now()}, advisor, "")
 }
 
 func (h *GaokaoHandler) AdvisorStream(c *gin.Context) {
@@ -270,7 +443,16 @@ func (h *GaokaoHandler) AdvisorStream(c *gin.Context) {
 	if strings.ToLower(provider) != "none" {
 		emit("report_generating", gin.H{"stage": "生成候选、逐校搜索并硬过滤", "progress": 68})
 		reportCtx, cancel := context.WithTimeout(c.Request.Context(), 480_000_000_000)
-		md, status, aiErr := generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		var md, status string
+		var aiErr error
+		switch {
+		case strings.EqualFold(provider, "committee_v2"):
+			md, status, aiErr = generateGaokaoReportWithMultiCandidateV2(reportCtx, h.aiService, h.searchService, h.usageRecorder(c), profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		case strings.EqualFold(provider, "committee_clip"):
+			md, status, aiErr = generateGaokaoReportWithCliproxyCommittee(reportCtx, h.aiService, h.searchService, h.usageRecorder(c), profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		default:
+			md, status, aiErr = generateGaokaoReportWithAIService(reportCtx, h.aiService, h.searchService, h.usageRecorder(c), profile, message, track, modelRecommendations, advisor.EvidenceLinks)
+		}
 		if aiErr == nil && strings.TrimSpace(md) != "" {
 			advisor.FinalReportMarkdown = md
 			advisor.ModelStatus = status
@@ -524,6 +706,8 @@ func (h *GaokaoHandler) GetPlan(c *gin.Context) {
 type gaokaoAgentAdjustRequest struct {
 	Command string                 `json:"command"`
 	Profile map[string]interface{} `json:"profile"`
+	Track   string                 `json:"track"`
+	History []services.Message     `json:"history"`
 }
 
 func (h *GaokaoHandler) AgentAdjust(c *gin.Context) {
@@ -532,12 +716,35 @@ func (h *GaokaoHandler) AgentAdjust(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式错误"})
 		return
 	}
-	profile, patch, actions := gaokaoAgentProfilePatch(strings.TrimSpace(req.Command), req.Profile)
-	reply := "我理解你的调整方向。已更新档案并准备重新生成 Advisor 方案。"
-	if len(actions) > 0 {
+	command := strings.TrimSpace(req.Command)
+	profile, patch, actions := gaokaoAgentProfilePatch(command, req.Profile)
+	shouldGenerate := gaokaoAgentShouldGenerate(command)
+	reply := "可以，我们先聊清楚目标。我会根据你的表达继续追问和记录偏好；等你说“按这个生成报告”或“重写报告”时，我再正式生成右侧文档。"
+	if len(actions) > 0 && shouldGenerate {
 		reply = strings.Join(actions, "") + "我会基于新条件重新生成方案卡片。"
+	} else if len(actions) > 0 {
+		reply = strings.Join(actions, "") + "我已先记录这些偏好，暂不重写报告。你可以继续补充城市、专业、预算、风险偏好；确认后说“按这个生成报告”。"
+	} else if shouldGenerate {
+		reply = "收到，我会按当前已确认条件生成右侧志愿报告。"
 	}
-	c.JSON(http.StatusOK, gin.H{"profile": profile, "profile_patch": patch, "rerun_advisor": true, "advisor_message": strings.TrimSpace(req.Command), "reply": reply})
+	if len(actions) == 0 && !shouldGenerate && h.aiService != nil {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60_000_000_000)
+		defer cancel()
+		historyJSON, _ := json.Marshal(req.History)
+		track := strings.TrimSpace(req.Track)
+		if track == "" {
+			track = "本科"
+		}
+		prompt := fmt.Sprintf("你是高考志愿咨询Agent。当前专项=%s。当前不是生成报告阶段，只和用户聊天、澄清目标、追问关键信息，不要输出长报告。必须记住并延续聊天历史，不要刚问过又忘。若专项是专科，就只围绕高考专科批/高职高专路径，不能切到已在读专科/已毕业专科咨询，也不要主动问是否已读专科；专升本只能作为专科入学后的后续升学路径讨论。当前档案：%v\n聊天历史JSON：%s\n用户说：%s", track, profile, string(historyJSON), command)
+		if text, err := callGaokaoAITextWithSearchContext(ctx, h.aiService, h.searchService, "gpt-5.5", []services.Message{{Role: "system", Content: "你是高考志愿咨询Agent，先聊天澄清，不直接生成报告；必须延续上下文。专科专项只讨论高考专科批路径和后续专升本可能。"}, {Role: "user", Content: prompt}}, false); err == nil && strings.TrimSpace(text) != "" {
+			reply = strings.TrimSpace(text)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"profile": profile, "profile_patch": patch, "rerun_advisor": shouldGenerate, "advisor_message": command, "reply": reply})
+}
+
+func gaokaoAgentShouldGenerate(command string) bool {
+	return gaokaoContainsAny(command, "生成报告", "生成方案", "出方案", "出报告", "重写报告", "重新生成", "按这个生成", "按这个出", "开始生成", "确认生成", "就这样生成", "可以生成了")
 }
 
 func gaokaoAgentProfilePatch(command string, input map[string]interface{}) (map[string]interface{}, map[string]interface{}, []string) {

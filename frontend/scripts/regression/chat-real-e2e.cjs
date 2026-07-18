@@ -60,14 +60,21 @@ async function registerUser() {
   });
   assert(res.status === 201, `register failed: ${res.status} ${redact(text.slice(0, 500))}`);
   const data = JSON.parse(text);
-  assert(data.token, "register response missing token");
-  return { token: data.token, user: data.user, email };
+  const setCookie = res.headers.get("set-cookie") || "";
+  const sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || "";
+  const refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || "";
+  const cookieHeader = [sessionToken ? `ai_space_session=${sessionToken}` : "", refreshToken ? `ai_space_refresh_token=${refreshToken}` : ""].filter(Boolean).join("; ");
+  return { sessionToken, refreshToken, cookieHeader, user: data.user, email };
 }
 
-async function createConversation(token) {
+function authHeaders(auth) {
+  return auth?.cookieHeader ? { Cookie: auth.cookieHeader } : {};
+}
+
+async function createConversation(auth) {
   const { res, text } = await fetchText(`${apiBaseUrl}/api/conversations`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", ...authHeaders(auth) },
     body: JSON.stringify({ title: `真实E2E ${Date.now()}`, model }),
   });
   assert(res.status === 201, `conversation create failed: ${res.status} ${redact(text.slice(0, 500))}`);
@@ -77,7 +84,7 @@ async function createConversation(token) {
 }
 
 
-async function uploadTextFile(token) {
+async function uploadTextFile(auth) {
   if (!attachTextFile) return null;
   const filename = process.env.REAL_CHAT_FILE_NAME || `real-chat-e2e-${Date.now()}.txt`;
   const content = process.env.REAL_CHAT_FILE_CONTENT || "附件事实：AI_SPACE_FILE_OK 314";
@@ -85,7 +92,7 @@ async function uploadTextFile(token) {
   form.append("file", new Blob([content], { type: "text/plain" }), filename);
   const res = await fetch(`${apiBaseUrl}/api/files/upload`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(auth),
     body: form,
   });
   const text = await res.text();
@@ -104,7 +111,7 @@ function parseSseDataChunk(raw) {
   return dataLines.map((line) => line.slice(5).trimStart()).join("\n");
 }
 
-async function runRealChatRequest(token, conversationId, upload) {
+async function runRealChatRequest(auth, conversationId, upload) {
   const body = {
     model,
     messages: [
@@ -122,7 +129,7 @@ async function runRealChatRequest(token, conversationId, upload) {
 
   const res = await fetch(`${apiBaseUrl}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", ...authHeaders(auth) },
     body: JSON.stringify(body),
   });
   const contentType = res.headers.get("content-type") || "";
@@ -182,7 +189,7 @@ async function runRealChatRequest(token, conversationId, upload) {
         if (cancelAfterTask && generationTaskId) {
           const cancelRes = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/cancel`, {
             method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
+            headers: authHeaders(auth),
           });
           assert(cancelRes.ok, `cancel task failed: ${cancelRes.status}`);
           await reader.cancel().catch(() => {});
@@ -227,9 +234,9 @@ async function runRealChatRequest(token, conversationId, upload) {
   };
 }
 
-async function verifyTaskRecoveryStream(token, generationTaskId) {
+async function verifyTaskRecoveryStream(auth, generationTaskId) {
   if (!taskRecoveryAfter || !generationTaskId) return null;
-  const res = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/stream?after=0`, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(`${apiBaseUrl}/api/tasks/${generationTaskId}/stream?after=0`, { headers: authHeaders(auth) });
   assert(res.ok, `task recovery stream failed: ${res.status}`);
   const text = await res.text();
   assert(text.includes("data:"), "task recovery stream returned no SSE data");
@@ -237,13 +244,13 @@ async function verifyTaskRecoveryStream(token, generationTaskId) {
   return { bytes: text.length, hasDone: true };
 }
 
-async function runCompareRequest(token, conversationId) {
+async function runCompareRequest(auth, conversationId) {
   const modelIds = (process.env.REAL_CHAT_COMPARE_MODELS || `${model},gemini-3.1-flash`).split(',').map((s) => s.trim()).filter(Boolean);
   assert(modelIds.length >= 2, "compare requires at least two models");
   const query = process.env.REAL_CHAT_COMPARE_QUERY || prompt;
   const { res, text } = await fetchText(`${apiBaseUrl}/api/chat/compare`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", ...authHeaders(auth) },
     body: JSON.stringify({ query, models: modelIds, conversation_id: conversationId, reasoning: reasoningEnabled, reasoning_effort: reasoningEffort, search: searchEnabled }),
   });
   assert(res.ok, `compare request failed: ${res.status} ${redact(text.slice(0, 800))}`);
@@ -255,9 +262,9 @@ async function runCompareRequest(token, conversationId) {
   return { results: results.length, okCount, conversationId };
 }
 
-async function verifyTaskAndHistory(token, ids, expectedContent) {
+async function verifyTaskAndHistory(auth, ids, expectedContent) {
   const taskUrl = `${apiBaseUrl}/api/chat/tasks/${ids.assistantMessageId}`;
-  const taskRes = await fetch(taskUrl, { headers: { Authorization: `Bearer ${token}` } });
+  const taskRes = await fetch(taskUrl, { headers: authHeaders(auth) });
   if (!taskRes.ok) {
     const errorBody = await taskRes.text();
     throw new Error(`task status failed: ${taskRes.status} ${redact(errorBody.slice(0, 500))}`);
@@ -273,7 +280,7 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   }
 
   const restoreRes = await fetch(`${apiBaseUrl}/api/conversations/${ids.conversationId}?message_tail=50`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(auth),
   });
   if (!restoreRes.ok) {
     const errorBody = await restoreRes.text();
@@ -298,7 +305,7 @@ async function verifyTaskAndHistory(token, ids, expectedContent) {
   }
 
   const countRes = await fetch(`${apiBaseUrl}/api/conversations/${ids.conversationId}/messages?limit=1`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(auth),
   });
   assert(countRes.ok, `message count failed: ${countRes.status}`);
   const countData = await countRes.json();
@@ -350,12 +357,18 @@ function startProxy() {
   });
 }
 
-async function runBrowserHistoryE2E(token, user, conversationId, expectedContent, expectedReasoning = "") {
+async function runBrowserHistoryE2E(auth, user, conversationId, expectedContent, expectedReasoning = "") {
   await waitForHttpOk(`${frontendBaseUrl}/chat/`, 60000);
   const proxy = await startProxy();
   const proxyBase = `http://127.0.0.1:${proxyPort}`;
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const context = await browser.newContext();
+  const cookieDomain = new URL(proxyBase).hostname;
+  const authCookies = [];
+  if (auth.sessionToken) authCookies.push({ name: "ai_space_session", value: auth.sessionToken, domain: cookieDomain, path: "/", httpOnly: true, secure: proxyBase.startsWith("https:"), sameSite: "Lax" });
+  if (auth.refreshToken) authCookies.push({ name: "ai_space_refresh_token", value: auth.refreshToken, domain: cookieDomain, path: "/", httpOnly: true, secure: proxyBase.startsWith("https:"), sameSite: "Lax" });
+  if (authCookies.length) await context.addCookies(authCookies);
+  const page = await context.newPage();
   const issues = [];
   const ignoredIssues = [];
   const recordIssue = (issue) => {
@@ -372,14 +385,14 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     if (response.status() >= 400 && !/favicon\.ico/.test(response.url())) issues.push(`response ${response.status()}: ${response.url()}`);
   });
   try {
-    await page.addInitScript(({ tokenValue, userValue, reasoningEffortValue, reasoningEnabledValue, searchEnabledValue }) => {
-      localStorage.setItem("token", tokenValue);
+    await page.addInitScript(({ userValue, reasoningEffortValue, reasoningEnabledValue, searchEnabledValue }) => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("admin_token");
       localStorage.setItem("user", JSON.stringify(userValue));
       localStorage.setItem("reasoning-mode", reasoningEffortValue);
       localStorage.setItem("reasoning-enabled", reasoningEnabledValue ? "true" : "false");
       localStorage.setItem("search-enabled", searchEnabledValue ? "true" : "false");
     }, {
-      tokenValue: token,
       userValue: user || {},
       reasoningEffortValue: reasoningEffort,
       reasoningEnabledValue: reasoningEnabled,
@@ -449,11 +462,11 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
     const auth = await registerUser();
     report.userId = auth.user?.id;
     report.defaultWorkspaceId = auth.user?.default_workspace_id;
-    const conversation = await createConversation(auth.token);
+    const conversation = await createConversation(auth);
     report.conversationId = conversation.id;
 
     if (mode === "compare") {
-      const compare = await runCompareRequest(auth.token, conversation.id);
+      const compare = await runCompareRequest(auth, conversation.id);
       Object.assign(report, { compare });
       report.elapsedMs = Date.now() - startedAt;
       console.log(JSON.stringify(report, null, 2));
@@ -461,9 +474,9 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
       return;
     }
 
-    const upload = await uploadTextFile(auth.token);
+    const upload = await uploadTextFile(auth);
     if (upload) report.upload = { publicId: upload.publicId, filename: upload.filename, contentLength: upload.contentLength };
-    const stream = await runRealChatRequest(auth.token, conversation.id, upload);
+    const stream = await runRealChatRequest(auth, conversation.id, upload);
     Object.assign(report, {
       streamEvents: stream.events,
       streamJsonEvents: stream.jsonEvents,
@@ -479,13 +492,13 @@ async function runBrowserHistoryE2E(token, user, conversationId, expectedContent
       lastGenerationStatus: stream.lastGenerationStatus,
     });
 
-    const persistence = await verifyTaskAndHistory(auth.token, stream, stream.content);
+    const persistence = await verifyTaskAndHistory(auth, stream, stream.content);
     Object.assign(report, persistence);
-    const recovery = await verifyTaskRecoveryStream(auth.token, stream.generationTaskId);
+    const recovery = await verifyTaskRecoveryStream(auth, stream.generationTaskId);
     if (recovery) report.taskRecovery = recovery;
 
     if (browserEnabled) {
-      const browser = await runBrowserHistoryE2E(auth.token, auth.user, stream.conversationId, stream.content, stream.reasoning);
+      const browser = await runBrowserHistoryE2E(auth, auth.user, stream.conversationId, stream.content, stream.reasoning);
       report.browserHistory = browser;
     }
 

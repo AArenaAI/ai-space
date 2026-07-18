@@ -52,10 +52,16 @@ type Message struct {
 	GenerationTaskID   uint           `gorm:"index" json:"generation_task_id,omitempty"`
 	LastSequenceNumber int64          `json:"last_sequence_number,omitempty"`
 	Phase              string         `gorm:"size:32" json:"phase,omitempty"`
+	Stopped            bool           `gorm:"index;default:false" json:"stopped,omitempty"` // 用户主动点击 Stop 的标记
 	StatusTimeline     string         `gorm:"type:text" json:"status_timeline,omitempty"`
 	CompletedAt        *time.Time     `json:"completed_at,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
+
+	// 前端本地发送契约身份（Gemini 式发送接受契约）
+	ClientMessageID string `gorm:"size:64;index" json:"client_message_id,omitempty"` // 前端 React key / DOM 身份
+	LocalRunID      string `gorm:"size:64;index" json:"local_run_id,omitempty"`      // 一次发送/停止/重试行为身份
+	SendStatus      string `gorm:"size:32;index" json:"send_status,omitempty"`       // local_committed | submitting | server_bound | failed | cancelled
 
 	GroupID    uint `gorm:"index" json:"group_id,omitempty"` // 所属消息组
 	GroupIndex int  `json:"group_index"`                     // 在组内的顺序；0 是有效列位，不能 omitempty

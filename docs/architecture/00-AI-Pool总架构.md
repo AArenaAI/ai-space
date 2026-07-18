@@ -47,7 +47,7 @@ flowchart LR
 | HTTP/API | `backend/internal/api` | 路由、参数校验、认证上下文、响应格式、SSE 输出 |
 | Service | `backend/internal/services` | AI Provider、文件解析、检索、图片/视频/PPT、用量计算 |
 | Model | `backend/internal/models` | GORM 模型、SQLite 初始化、迁移、索引 |
-| Middleware | `backend/internal/middleware` | JWT、可选认证、IP 限流 |
+| Middleware | `backend/internal/middleware` | HttpOnly Cookie session / legacy Bearer 兼容认证、可选认证、IP 限流 |
 | Config | `backend/internal/config` | Provider Key、价格、端口、存储目录、开关 |
 | Skills | `backend/internal/skills` | 技能加载、匹配、注入 |
 

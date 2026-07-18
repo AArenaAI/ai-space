@@ -2133,6 +2133,8 @@ function MessageList({
                   imageLoadFailedLabel={t("chat.imageLoadFailed")}
                   MarkdownRenderer={LazyMarkdownRenderer}
                   onCopy={handleCopy}
+                  canEditUserMessage={canEditUserMessages && Boolean(onEditUserMessage)}
+                  onEditUserMessage={onEditUserMessage}
                   onRegenerate={onRegenerate}
                   onContinueGenerate={onContinueGenerate}
                   onShareSelectMode={(id) => enterSelectMode("share", id)}
@@ -2308,7 +2310,7 @@ function MessageList({
                 onContinueGenerate={onContinueGenerate}
                 onRetryUserMessage={onRetryUserMessage}
                 onEditUserMessage={onEditUserMessage}
-                canEditUserMessages={canEditUserMessages && !effectiveIsCompare}
+                canEditUserMessages={canEditUserMessages}
                 onForkCompare={onForkCompare}
                 onSaveAssistantToNote={onSaveAssistantToNote}
                 onAssistantViewed={handleAssistantViewed}

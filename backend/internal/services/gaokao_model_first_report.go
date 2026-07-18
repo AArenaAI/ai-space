@@ -41,7 +41,7 @@ func GenerateGaokaoModelFirstReport(ctx context.Context, profile GaokaoProfile, 
 
 初稿：
 ` + draft
-	review, reviewErr := callGaokaoReportRawModel(ctx, "deepseek", "deepseek-chat", reviewPrompt, 1600)
+	review, reviewErr := callGaokaoReportRawModel(ctx, "deepseek", "deepseek-v4-pro", reviewPrompt, 1600)
 	if reviewErr != nil {
 		review = "复核模型暂不可用；终稿需保留来源复核和经验估计说明。"
 	}

@@ -60,10 +60,10 @@ async function login() {
   const text = await res.text();
   if (!res.ok) throw new Error(`${apiBaseUrl}/api/auth/login -> ${res.status} ${redact(text.slice(0, 500))}`);
   const data = JSON.parse(text);
-  assert.ok(data.token, "login response missing token");
   const setCookie = res.headers.get("set-cookie") || "";
   data.sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || "";
   data.refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || "";
+  data.cookieHeader = [data.sessionToken ? `ai_space_session=${data.sessionToken}` : "", data.refreshToken ? `ai_space_refresh_token=${data.refreshToken}` : ""].filter(Boolean).join("; ");
   return data;
 }
 
@@ -362,6 +362,11 @@ async function main() {
   const proxyBase = `http://127.0.0.1:${proxyPort}`;
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const cookieDomain = new URL(baseUrl).hostname;
+  const authCookies = [];
+  if (auth.sessionToken) authCookies.push({ name: "ai_space_session", value: auth.sessionToken, domain: cookieDomain, path: "/", httpOnly: true, secure: baseUrl.startsWith("https:"), sameSite: "Lax" });
+  if (auth.refreshToken) authCookies.push({ name: "ai_space_refresh_token", value: auth.refreshToken, domain: cookieDomain, path: "/", httpOnly: true, secure: baseUrl.startsWith("https:"), sameSite: "Lax" });
+  if (authCookies.length) await context.addCookies(authCookies);
   const proxyHost = new URL(proxyBase).hostname;
   const cookies = [];
   if (auth.sessionToken) cookies.push({ name: "ai_space_session", value: auth.sessionToken, domain: proxyHost, path: "/", httpOnly: true, secure: false, sameSite: "Lax" });
@@ -377,8 +382,9 @@ async function main() {
 
   try {
     await waitForHttpOk(`${proxyBase}/chat/`, 60000);
-    await page.addInitScript(({ tokenValue, userValue }) => {
-      localStorage.setItem("token", tokenValue);
+    await page.addInitScript(({ userValue }) => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("admin_token");
       localStorage.setItem("user", JSON.stringify(userValue || {}));
       localStorage.setItem("theme", "green");
       window.__chatRenderProfileEvents = [];
@@ -392,7 +398,7 @@ async function main() {
         }).observe({ entryTypes: ["longtask"] });
       } catch {}
       window.addEventListener("chat-render-profile", (event) => window.__chatRenderProfileEvents.push(event.detail));
-    }, { tokenValue: auth.token, userValue: auth.user || {} });
+    }, { userValue: auth.user || {} });
 
     await page.goto(`${proxyBase}/chat/?id=${conversationId}`, { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForSelector('[data-testid="chat-history-scroll-container"]', { timeout: 30000 });

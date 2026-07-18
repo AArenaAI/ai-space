@@ -19,6 +19,7 @@ import {
   PinOff,
   Link2,
   Check,
+  GraduationCap,
   MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,9 +34,10 @@ import { apiFetch, apiJson } from "@/lib/api/client";
 import { logoutBrowserSession } from "@/lib/auth/state";
 
 const navItems = [
-  { icon: MessageSquare, label: "聊天", href: "/chat" },
-  { icon: Palette, label: "画图", href: "/image" },
-  { icon: Presentation, label: "PPT", href: "/ppt" },
+  { icon: GraduationCap, label: "AI 高考志愿", href: "/gaokao-volunteer" },
+  { icon: MessageSquare, label: "聊天", href: "/chat", disabled: true },
+  { icon: Palette, label: "画图", href: "/image", disabled: true },
+  { icon: Presentation, label: "PPT", href: "/ppt", disabled: true },
 ];
 
 type Conversation = SidebarConversation;
@@ -332,9 +334,11 @@ export default function MobileNav() {
         <div className="shrink-0 py-2 px-2 space-y-0.5 border-b border-surface-border">
           {navItems.map((item) => {
             const active = pathname === item.href;
+            const disabled = !!item.disabled;
             return (
-              <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150", active ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
+              <Link key={item.href} href={item.href} onClick={(e) => { if (disabled) e.preventDefault(); else setMenuOpen(false); }} className={cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150", disabled ? "cursor-not-allowed text-text-tertiary opacity-45 grayscale" : active ? "bg-surface-card text-text-primary font-medium shadow-sm" : "text-text-secondary hover:bg-surface-card hover:text-text-primary")}>
                 <item.icon className="w-4 h-4 shrink-0" /><span>{item.label}</span>
+                {disabled && <span className="ml-auto rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-tertiary">暂未开放</span>}
               </Link>
             );
           })}

@@ -78,7 +78,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	if err := gaokaoService.EnsureSeedData(); err != nil {
 		fmt.Printf("[WARN] 高考志愿种子数据初始化失败: %v\n", err)
 	}
-	gaokaoHandler := NewGaokaoHandler(db, gaokaoService, aiService, searchService)
+	gaokaoHandler := NewGaokaoHandler(db, gaokaoService, aiService, searchService, usageService)
 
 	// 专用翻译服务（Google Cloud Translation）
 	translateService := services.NewTranslateService(cfg)
@@ -101,7 +101,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	fileHandler := NewFileHandler(fileService, db)
 	// 动态 Chat Shell（需由 nginx 将 /chat 与 /skills/chat 转发到 Go 后启用；静态部署未转发时保持原行为）。
 	dynamicShell := router.Group("")
-	dynamicShell.Use(middleware.OptionalAuthMiddleware(cfg))
+	dynamicShell.Use(middleware.OptionalSessionAuthMiddleware(db, cfg))
 	{
 		dynamicShell.GET("/chat", chatShellHandler.ServeChat)
 		dynamicShell.HEAD("/chat", chatShellHandler.ServeChat)
@@ -140,7 +140,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 公开路由（可选认证，支持匿名用户与登录用户共用）
 	publicWithAuth := router.Group("/api")
-	publicWithAuth.Use(middleware.OptionalAuthMiddleware(cfg))
+	publicWithAuth.Use(middleware.OptionalSessionAuthMiddleware(db, cfg))
 	{
 		// 聊天路由
 		publicWithAuth.POST("/chat", chatHandler.Chat)
@@ -152,6 +152,8 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		publicWithAuth.POST("/gaokao/recommend", gaokaoHandler.Recommend)
 		publicWithAuth.POST("/gaokao/advisor", gaokaoHandler.Advisor)
 		publicWithAuth.POST("/gaokao/advisor/stream", gaokaoHandler.AdvisorStream)
+		publicWithAuth.POST("/gaokao/advisor/tasks", gaokaoHandler.AdvisorTaskStart)
+		publicWithAuth.GET("/gaokao/advisor/tasks/:id", gaokaoHandler.AdvisorTaskGet)
 		publicWithAuth.POST("/gaokao/guide", gaokaoHandler.Guide)
 		publicWithAuth.POST("/gaokao/volunteer-table", gaokaoHandler.VolunteerTable)
 		publicWithAuth.POST("/gaokao/agent-adjust", gaokaoHandler.AgentAdjust)
@@ -245,7 +247,7 @@ func NewRouter(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	// 需要认证的路由
 	authorized := router.Group("/api")
-	authorized.Use(middleware.AuthMiddleware(cfg))
+	authorized.Use(middleware.SessionAuthMiddleware(db, cfg))
 	{
 		adminHandler := NewAdminHandler(db, cfg)
 		admin := authorized.Group("/admin")

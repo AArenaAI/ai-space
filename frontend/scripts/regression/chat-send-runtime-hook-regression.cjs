@@ -108,7 +108,7 @@ function loadModule(file) {
     };
     if (specifier === "@/lib/chatConversationCreateCoordinator") {
       return {
-        shouldCreateConversation: ({ token }) => Boolean(token),
+        shouldCreateConversation: () => true,
         buildCreateConversationBody: ({ title, model, skillKey, workspaceId }) => ({ title, model, skill_key: skillKey || undefined, workspace_id: workspaceId ? Number(workspaceId) : undefined }),
         runCreateConversationRequest: (...args) => createConversationRequestImpl(...args),
         resolveCreatedConversationTitle: (data, fallback) => data.title || fallback,
@@ -158,7 +158,11 @@ function loadModule(file) {
         applyCompareGroupContextToMessages: (messages, { context }) => messages.map((m) => ({ ...m, groupId: context.groupId || m.groupId, userMessageId: context.userMessageId || m.userMessageId })),
       };
     }
-    if (specifier === "@/lib/chatRequestBuilder") return { buildChatRequestHeaders: ({ token, guestId }) => token ? { Authorization: `Bearer ${token}` } : { "X-Guest-ID": guestId } };
+    if (specifier === "@/lib/chatRequestBuilder") return { buildChatRequestHeaders: ({ token, guestId }) => {
+      const headers = guestId ? { "X-Guest-ID": guestId } : {};
+      if (token) headers.Authorization = ["Bearer", token].join(" ");
+      return headers;
+    } };
     if (specifier === "@/lib/chatHistoryTransform") return { toModelMessages: (messages) => messages.map((m) => ({ role: m.role, content: m.content })) };
     if (specifier === "@/lib/chatInitialRealtime") return { initializeAssistantRealtime: () => {}, initializeAssistantRealtimeBatch: () => {} };
     if (specifier === "@/lib/chatConversationCache") return { setConversationSnapshot: () => {} };

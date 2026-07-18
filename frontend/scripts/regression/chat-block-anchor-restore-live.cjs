@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 async function waitForMarkdownBlocks(page) {
   try {
@@ -62,15 +62,16 @@ async function sampleAnchor(page) {
   const pageErrors = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
+  await page.addInitScript(({ user }) => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin_token');
     localStorage.setItem('user', JSON.stringify(user));
     if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
     localStorage.setItem('reasoning-mode', 'fast');
     localStorage.setItem('reasoning-enabled', 'false');
     localStorage.setItem('search-enabled', 'false');
     localStorage.setItem('theme', 'dark');
-  }, { token: auth.token, user: auth.user });
+  }, { auth, user: auth.user });
 
   await page.goto(`${baseUrl}/chat/?id=${conversationId}&block_anchor=${Date.now()}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForMarkdownBlocks(page);

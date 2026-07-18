@@ -243,6 +243,7 @@ interface HoverPanelItem {
   href: string;
   color: string;
   bg: string;
+  disabled?: boolean;
 }
 
 interface HoverPanelGroup {
@@ -272,7 +273,8 @@ function HoverPanel({
     return () => document.removeEventListener("keydown", handler);
   }, [open, onClose]);
 
-  const handleNavigate = (href: string) => {
+  const handleNavigate = (href: string, disabled?: boolean) => {
+    if (disabled) return;
     onClose();
     router.push(href);
   };
@@ -297,14 +299,21 @@ function HoverPanel({
             {group.items.map((item) => (
               <button
                 key={item.label}
-                onClick={() => handleNavigate(item.href)}
-                title={item.label}
-                className="flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 hover:bg-surface-card group cursor-pointer"
+                onClick={() => handleNavigate(item.href, item.disabled)}
+                title={item.disabled ? `${item.label} · 暂未开放` : item.label}
+                disabled={item.disabled}
+                className={cn(
+                  "flex items-center gap-2.5 p-2.5 rounded-xl text-left transition-all duration-150 group",
+                  item.disabled
+                    ? "cursor-not-allowed opacity-45 grayscale"
+                    : "cursor-pointer hover:bg-surface-card"
+                )}
               >
                 <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0", item.bg)}>
-                  <item.icon className={cn("w-4 h-4", item.color)} />
+                  <item.icon className={cn("w-4 h-4", item.disabled ? "text-text-tertiary" : item.color)} />
                 </div>
-                <span className="text-sm text-text-secondary group-hover:text-text-primary transition-colors">{item.label}</span>
+                <span className={cn("text-sm transition-colors", item.disabled ? "text-text-tertiary" : "text-text-secondary group-hover:text-text-primary")}>{item.label}</span>
+                {item.disabled && <span className="ml-auto text-[10px] text-text-tertiary">暂未开放</span>}
               </button>
             ))}
           </div>
@@ -1212,15 +1221,15 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             <div className="pt-3 pb-2">
               <button
                 type="button"
-                onClick={handleNewChat}
+                onClick={(e) => e.preventDefault()}
                 onMouseEnter={showSidebarTooltip(`${t("sidebar.tooltip.chat")} ${mod}I`)}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors block",
-                  pathname === "/chat" ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
                 )}
               >
-                <MessageSquare className={cn("w-5 h-5", pathname === "/chat" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
+                <MessageSquare className="w-5 h-5 text-text-tertiary" />
               </button>
             </div>
 
@@ -1249,9 +1258,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ref={workBtnRef}
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
-                    isWorkRoute
-                      ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
-                      : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                    "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
                   )}
                 >
                   <Briefcase className={cn("w-5 h-5",
@@ -1271,9 +1278,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                   ref={moreBtnRef}
                   className={cn(
                     "p-2.5 rounded-xl transition-colors",
-                    isCreativeRoute
-                      ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]"
-                      : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                    "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
                   )}
                 >
                   <LayoutGrid className={cn("w-5 h-5", isCreativeRoute ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
@@ -1289,23 +1294,24 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             <div className="py-2 flex flex-col items-center space-y-0.5">
               <Link
                 href="/favorites"
-                onMouseEnter={showSidebarTooltip(t("sidebar.tooltip.favorites"))}
+                onClick={(e) => e.preventDefault()}
+                onMouseEnter={showSidebarTooltip(`${t("sidebar.tooltip.favorites")} · 暂未开放`)}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  isPathInGroup(pathname, ["/favorites"]) ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
                 )}
               >
                 <Star className={cn("w-5 h-5", isPathInGroup(pathname, ["/favorites"]) ? "text-brand" : "text-text-tertiary")} />
               </Link>
               <Link
                 href="/notebooks"
-                onClick={() => setCollapsed(true)}
-                onMouseEnter={showSidebarTooltip(t("sidebar.nav.notebook"))}
+                onClick={(e) => e.preventDefault()}
+                onMouseEnter={showSidebarTooltip(`${t("sidebar.nav.notebook")} · 暂未开放`)}
                 onMouseLeave={hideSidebarTooltip}
                 className={cn(
                   "p-2.5 rounded-xl transition-colors",
-                  isPathInGroup(pathname, ["/notebooks"]) ? "bg-surface-card text-text-primary shadow-sm shadow-black/[0.02]" : "text-text-tertiary hover:bg-surface-card hover:text-text-primary"
+                  "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
                 )}
               >
                 <BookOpen className={cn("w-5 h-5", isPathInGroup(pathname, ["/notebooks"]) ? "text-brand" : "text-text-tertiary")} />
@@ -1333,15 +1339,13 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
             <div className="px-3 pt-3 pb-2">
               <button
                 type="button"
-                onClick={handleNewChat}
+                onClick={(e) => e.preventDefault()}
                 className={cn(
                   "group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
-                  pathname === "/chat"
-                    ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
-                    : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                  "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
                 )}
               >
-                <MessageSquare className={cn("w-[18px] h-[18px] shrink-0 transition-colors", pathname === "/chat" ? "text-slate-900 dark:text-text-primary" : "text-text-tertiary")} />
+                <MessageSquare className="w-[18px] h-[18px] shrink-0 text-text-tertiary" />
                 <span className="flex-1 text-left">{t("sidebar.nav.chat")}</span>
                 <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono text-text-secondary leading-none opacity-0 group-hover:opacity-100 transition-opacity">
                   {mod}I
@@ -1373,15 +1377,15 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
                 <Link
                   href="/ai-comic"
+                  onClick={(e) => e.preventDefault()}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
-                    isPathInGroup(pathname, ["/ai-comic"])
-                      ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
-                      : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                    "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
                   )}
                 >
-                  <Sparkles className={cn("w-[18px] h-[18px] shrink-0 transition-colors", isPathInGroup(pathname, ["/ai-comic"]) ? "text-amber-500" : "text-text-tertiary")} />
+                  <Sparkles className="w-[18px] h-[18px] shrink-0 text-text-tertiary" />
                   <span>{t("seedreamBeta.navLabel")}</span>
+                  <span className="ml-auto rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-tertiary">暂未开放</span>
                 </Link>
 
                 {/* AI工作 - hover 展开 */}
@@ -1393,9 +1397,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                     ref={workBtnRef}
                     className={cn(
                       "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
-                      isWorkRoute && !isPathInGroup(pathname, ["/ai-comic"])
-                        ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
-                        : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                      "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
                     )}
                   >
                     <div className="flex items-center gap-3">
@@ -1419,9 +1421,7 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                     ref={moreBtnRef}
                     className={cn(
                       "flex items-center justify-between w-full px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150",
-                      isCreativeRoute
-                        ? "bg-surface-card text-slate-900 font-medium shadow-sm shadow-black/[0.02] dark:text-text-primary"
-                        : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                      "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
                     )}
                   >
                     <div className="flex items-center gap-3">
@@ -1441,26 +1441,24 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={navigateToNotebooks}
+                  onClick={(e) => e.preventDefault()}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      navigateToNotebooks();
+                      return;
                     }
                   }}
                   className={cn(
                     "mb-1 flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2 text-left transition-all duration-150",
-                    isPathInGroup(pathname, ["/notebooks"])
-                      ? "bg-surface-card text-slate-950 shadow-sm shadow-black/[0.02] dark:text-text-primary"
-                      : "text-slate-950 hover:bg-surface-card hover:text-slate-900 dark:text-text-primary dark:hover:text-text-primary"
+                    "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate text-sm font-medium tracking-wide">{t("sidebar.nav.notebook")}</span>
                   <button
                     type="button"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setNotebookCreateOpen(true); }}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     title={t("notebook.new")}
-                    className="ml-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-text-tertiary transition hover:bg-surface-card hover:text-brand"
+                    className="ml-2 flex h-6 w-6 shrink-0 cursor-not-allowed items-center justify-center rounded-lg text-text-tertiary opacity-50"
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -1468,9 +1466,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
 
                 <Link
                   href="/favorites"
+                  onClick={(e) => e.preventDefault()}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-normal transition-all duration-150 w-full text-left",
-                    isPathInGroup(pathname, ["/favorites"]) ? "bg-brand-muted text-text-primary font-medium" : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                    "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
                   )}
                 >
                   <Star className={cn("w-[18px] h-[18px] shrink-0 transition-colors", isPathInGroup(pathname, ["/favorites"]) ? "text-brand" : "text-text-tertiary")} />
@@ -1500,12 +1499,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
                           notebookLongPressTriggeredRef.current = false;
                           return;
                         }
-                        router.push(href);
+                        return;
                       }}
                       data-notebook-item-key={notebook.itemKey}
                       title={notebook.title}
                       className={cn(
-                        "group flex w-full touch-none items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-normal transition-all duration-150 select-none",
+                        "group flex w-full touch-none items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-normal transition-all duration-150 select-none cursor-not-allowed opacity-45 grayscale",
                         draggingNotebookKey === notebook.itemKey ? "cursor-grabbing bg-brand-muted text-text-primary ring-1 ring-brand-border" : "cursor-pointer",
                         draggingNotebookKey && draggingNotebookKey !== notebook.itemKey ? "ring-1 ring-transparent hover:ring-brand-border" : "",
                         !isDemo && isPathInGroup(pathname, ["/notebooks"]) && searchParams?.get("notebook_id") === String(notebook.id)
@@ -1568,12 +1567,12 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
           {
             title: t("sidebar.panel.create"),
             items: [
-              { icon: ImageIcon, label: t("image.generateImage"), href: "/image", color: "text-purple-500", bg: "bg-purple-500/10" },
-              { icon: Video, label: t("video.generateVideo"), href: "/video", color: "text-blue-500", bg: "bg-blue-500/10" },
-              { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/create?mode=remove-bg", color: "text-green-500", bg: "bg-green-500/10" },
-              { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", color: "text-purple-500", bg: "bg-purple-500/10" },
-              { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", color: "text-amber-500", bg: "bg-amber-500/10" },
-              { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/create?mode=upscale", color: "text-cyan-500", bg: "bg-cyan-500/10" },
+              { icon: ImageIcon, label: t("image.generateImage"), href: "/image", disabled: true, color: "text-purple-500", bg: "bg-purple-500/10" },
+              { icon: Video, label: t("video.generateVideo"), href: "/video", disabled: true, color: "text-blue-500", bg: "bg-blue-500/10" },
+              { icon: Image, label: t("sidebar.panel.remove_bg"), href: "/create?mode=remove-bg", disabled: true, color: "text-green-500", bg: "bg-green-500/10" },
+              { icon: Eraser, label: t("sidebar.panel.replace_bg"), href: "/create?mode=replace-bg", disabled: true, color: "text-purple-500", bg: "bg-purple-500/10" },
+              { icon: Type, label: t("sidebar.panel.text_removal"), href: "/create?mode=text-removal", disabled: true, color: "text-amber-500", bg: "bg-amber-500/10" },
+              { icon: ZoomIn, label: t("sidebar.panel.upscale"), href: "/create?mode=upscale", disabled: true, color: "text-cyan-500", bg: "bg-cyan-500/10" },
             ],
           },
         ]}
@@ -1590,10 +1589,10 @@ export default function AppSidebar({ skillKey, resizeHandleOffset = 0 }: { skill
           {
             title: t("sidebar.nav.ai_work"),
             items: [
-              { icon: PenTool, label: t("work.writingAssistant"), href: "/writing-assistant", color: "text-pink-500", bg: "bg-pink-500/10" },
-              { icon: Languages, label: t("work.translator"), href: "/translator", color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
-              { icon: Mic, label: t("work.liveTranslate"), href: "/live-translate", color: "text-emerald-500", bg: "bg-emerald-500/10" },
-              { icon: FileText, label: t("work.documentReader"), href: "/document-reader", color: "text-orange-500", bg: "bg-orange-500/10" },
+              { icon: PenTool, label: t("work.writingAssistant"), href: "/writing-assistant", disabled: true, color: "text-pink-500", bg: "bg-pink-500/10" },
+              { icon: Languages, label: t("work.translator"), href: "/translator", disabled: true, color: "text-fuchsia-500", bg: "bg-fuchsia-500/10" },
+              { icon: Mic, label: t("work.liveTranslate"), href: "/live-translate", disabled: true, color: "text-emerald-500", bg: "bg-emerald-500/10" },
+              { icon: FileText, label: t("work.documentReader"), href: "/document-reader", disabled: true, color: "text-orange-500", bg: "bg-orange-500/10" },
             ],
           },
         ]}

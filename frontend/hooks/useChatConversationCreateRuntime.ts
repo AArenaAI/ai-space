@@ -73,7 +73,7 @@ export function useChatConversationCreateRuntime({
         }
         const data = await runCreateConversationRequest({
           apiBaseUrl,
-          token: token as string,
+          token,
           body,
         });
         if (!data) {

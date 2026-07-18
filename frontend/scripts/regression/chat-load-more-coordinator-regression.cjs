@@ -53,12 +53,12 @@ function response(ok, data) {
 }
 
 (async () => {
-  await test("shouldStartLoadMore requires conversation, token, idle and has-more", () => {
+  await test("shouldStartLoadMore requires conversation, idle and has-more", () => {
     assert.equal(shouldStartLoadMore({ currentConversation: 1, isLoadingMore: false, hasMoreMessages: true, token: "t" }), true);
     assert.equal(shouldStartLoadMore({ currentConversation: undefined, isLoadingMore: false, hasMoreMessages: true, token: "t" }), false);
     assert.equal(shouldStartLoadMore({ currentConversation: 1, isLoadingMore: true, hasMoreMessages: true, token: "t" }), false);
     assert.equal(shouldStartLoadMore({ currentConversation: 1, isLoadingMore: false, hasMoreMessages: false, token: "t" }), false);
-    assert.equal(shouldStartLoadMore({ currentConversation: 1, isLoadingMore: false, hasMoreMessages: true, token: null }), false);
+    assert.equal(shouldStartLoadMore({ currentConversation: 1, isLoadingMore: false, hasMoreMessages: true, token: null }), true);
   });
 
   await test("buildLoadMorePage defaults to small chat history pages", () => {
@@ -105,7 +105,7 @@ function response(ok, data) {
     );
   });
 
-  await test("fetchLoadMoreMessages fetches page with bearer token and ignores non-ok", async () => {
+  await test("fetchLoadMoreMessages fetches page with optional bearer token and ignores non-ok", async () => {
     const calls = [];
     const data = await fetchLoadMoreMessages({
       apiBaseUrl: "http://api",
@@ -119,6 +119,19 @@ function response(ok, data) {
     });
     assert.deepEqual(calls, [["http://api/api/conversations/7/messages?limit=25&offset=5", "Bearer token"]]);
     assert.equal(data.total, 8);
+
+    const cookieCalls = [];
+    await fetchLoadMoreMessages({
+      apiBaseUrl: "http://api",
+      conversationId: 7,
+      token: null,
+      page: { requestLimit: 25, offset: 5 },
+      fetchImpl: async (url, init) => {
+        cookieCalls.push([url, init.headers.Authorization]);
+        return response(true, { messages: [], total: 8 });
+      },
+    });
+    assert.deepEqual(cookieCalls, [["http://api/api/conversations/7/messages?limit=25&offset=5", undefined]]);
 
     const missing = await fetchLoadMoreMessages({
       conversationId: 7,

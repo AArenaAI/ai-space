@@ -221,7 +221,7 @@ func (h *ImageChatHandler) CreateImageChat(c *gin.Context) {
 					refPaths = append(refPaths, p)
 				}
 			}
-			go h.processImageChatJob(assistantMsg.ID, req.Prompt, size, quality, refPaths, baseURL, chat.ID)
+			go h.processImageChatJob(assistantMsg.ID, strengthenImageTextPrompt(req.Prompt), size, quality, refPaths, baseURL, chat.ID)
 		}
 	}
 
@@ -377,7 +377,7 @@ func (h *ImageChatHandler) SendImageChatMessage(c *gin.Context) {
 	}
 
 	baseURL := resolveBaseURL(c, h.cfg)
-	go h.processImageChatJob(assistantMsg.ID, req.Prompt, size, quality, refPaths, baseURL, chat.ID)
+	go h.processImageChatJob(assistantMsg.ID, strengthenImageTextPrompt(req.Prompt), size, quality, refPaths, baseURL, chat.ID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message_id": assistantMsg.ID,

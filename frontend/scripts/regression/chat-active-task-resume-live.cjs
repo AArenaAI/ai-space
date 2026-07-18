@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
@@ -12,7 +12,7 @@ const { env, login, openAuthedPage, summarizeConsole, printResult } = require('.
   if (requestedConversationId) bootstrapUrl.searchParams.set('id', String(requestedConversationId));
   bootstrapUrl.searchParams.set('message_tail', '32');
   bootstrapUrl.searchParams.set('conversation_limit', '30');
-  const bootstrapRes = await fetch(bootstrapUrl, { headers: { Authorization: `Bearer ${auth.token}` } });
+  const bootstrapRes = await fetch(bootstrapUrl, { headers: { ...authHeaders(auth) } });
   if (!bootstrapRes.ok) throw new Error(`bootstrap ${bootstrapRes.status}: ${await bootstrapRes.text()}`);
   const bootstrap = await bootstrapRes.json();
   const activeTasks = bootstrap?.active_tasks?.chat || [];
@@ -24,7 +24,7 @@ const { env, login, openAuthedPage, summarizeConsole, printResult } = require('.
     return;
   }
   const conversationId = targetTask.conversation_id;
-  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });

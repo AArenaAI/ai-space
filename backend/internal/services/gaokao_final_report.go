@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -53,6 +54,15 @@ func BuildGaokaoFinalReportMarkdown(profile GaokaoProfile, _ string, report Gaok
 
 func GenerateGaokaoFinalReportMarkdown(ctx context.Context, profile GaokaoProfile, message string, track string, recs []GaokaoRecommendation, links []GaokaoAdvisorEvidenceLink) (string, string, error) {
 	materials := buildGaokaoFinalReportMaterials(profile, track, recs, links)
+	collegeTrack := strings.Contains(track, "专科") || strings.EqualFold(track, "college")
+	tableColumns := "学校、城市、层次、2025参考最低位次、推荐专业、录取概率、保研率（约）、深造率（约）、就业特色、推荐指数"
+	collegeRule := "本科专项可使用保研率/深造率等本科口径。"
+	dataRule := "2025参考最低位次、保研率、深造率若缺少官方材料，可给行业经验估计并标“约/参考/需复核”，但不能留空。"
+	if collegeTrack {
+		tableColumns = "学校、城市、层次、2025参考最低位次、推荐专业、录取概率、专升本概率（约）、升学路径、就业特色、推荐指数"
+		collegeRule = "专科专项禁止出现保研率、推免率、保研、保送研究生等本科口径；如需升学指标，统一写专升本概率（约）和升学路径。"
+		dataRule = "2025参考最低位次、专升本概率、升学路径若缺少官方材料，可给行业经验估计并标“约/参考/需复核”，但不能留空；不得出现保研率/推免率列。"
+	}
 	draftPrompt := fmt.Sprintf(`你是资深高考志愿规划师。请像 ChatGPT 专业报告一样，基于考生需求和可用材料，生成一份完整自然语言《高考志愿规划报告》初稿。
 
 要求：
@@ -62,16 +72,17 @@ func GenerateGaokaoFinalReportMarkdown(ctx context.Context, profile GaokaoProfil
 4. 必须包含：考生画像、总体策略、冲刺/稳妥/保底院校建议、最推荐Top10、专业排序、风险提示、来源与复核说明。
 5. 进入%s专项，只做%s相关建议，不要混入其它批次。
 6. 注意：考生省份是考试省份，不等于城市/地域偏好；除非用户明确“只看省内/偏好安徽”，否则必须全国择优，不能 Top10 全是本省院校。
-7. 院校表必须使用 Markdown 表格，并至少包含这些列：学校、城市、层次、2025参考最低位次、推荐专业、录取概率、保研率（约）、深造率（约）、就业特色、推荐指数。
-8. 层次列必须明确写成：985/211/双一流/公办一本/公办二本/民办本科/职业本科/专科。不能只用“省重点”“电子强校”这类模糊标签。
-9. 2025参考最低位次、保研率、深造率若缺少官方材料，可给行业经验估计并标“约/参考/需复核”，但不能留空。
+7. 院校表必须使用 Markdown 表格，并至少包含这些列：%s。
+8. %s
+9. 层次列必须明确写成：985/211/双一流/公办一本/公办二本/民办本科/职业本科/专科/本科院校专科专业。专科专项里，如果学校本身是本科院校但招生专业属于专科批，层次必须写“本科院校专科专业”；独立高职高专写“专科/高职高专”。不能只用“省重点”“电子强校”这类模糊标签。
+9. %s
 10. 严格位次过滤：严禁推荐录取位次显著高于考生位次的民办本科或低层级院校。例如，考生位次4万左右，推荐的院校最低位次原则上不应超过考生位次的1.5倍（约6万位）；民办本科、职业本科、独立学院只允许出现在考生位次接近本科线或已接近民办本科录取区间时使用。绝对不能把录取位次19万的民办本科推荐给位次4万的考生。
 11. 输出 Markdown，正文完整，可直接作为用户报告。
 
 用户补充需求：%s
 
 材料：
-%s`, track, track, message, materials)
+%s`, track, track, tableColumns, collegeRule, dataRule, message, materials)
 	draft, err := callGaokaoFinalReportChat(ctx, "openai", draftPrompt, 5200)
 	log.Printf("[gaokao-final-report] draft len=%d err=%v", len(draft), err)
 	if err != nil {
@@ -106,8 +117,9 @@ func GenerateGaokaoFinalReportMarkdown(ctx context.Context, profile GaokaoProfil
 - 数据不确定时用“约、参考、需以考试院/高校官网复核”，但仍要给规划建议。
 - Top10 不要放非学校名、排名榜单标题、网页标题。
 - 注意：考生省份是考试省份，不等于城市/地域偏好；除非用户明确“只看省内/偏好本省”，否则必须全国择优，不能 Top10 全是本省院校。
-- 必须输出一张“重点推荐院校表”，Markdown 表格列为：学校、城市、层次、2025参考最低位次、推荐专业、录取概率、保研率（约）、深造率（约）、就业特色、推荐指数。
-- 层次列必须明确写成：985/211/双一流/公办一本/公办二本/民办本科/职业本科/专科。不要写“省重点”“电子强校”等模糊标签。
+- 必须输出一张“重点推荐院校表”，Markdown 表格列为：%s。
+- %s
+- 层次列必须明确写成：985/211/双一流/公办一本/公办二本/民办本科/职业本科/专科/本科院校专科专业。专科专项里，如果学校本身是本科院校但招生专业属于专科批，层次必须写“本科院校专科专业”；独立高职高专写“专科/高职高专”。不要写“省重点”“电子强校”等模糊标签。
 - 每所学校必须写出学校特点/就业特色，不能只写学校名和概率。
 - 语言要像完整的 ChatGPT 志愿规划报告，而不是后端数据面板。
 - 保留免责声明：录取概率为经验估计，非官方概率。
@@ -117,7 +129,7 @@ func GenerateGaokaoFinalReportMarkdown(ctx context.Context, profile GaokaoProfil
 %s
 
 初稿：
-%s`, review, draft)
+%s`, tableColumns, collegeRule, review, draft)
 	final, err := callGaokaoFinalReportChat(ctx, "openai", finalPrompt, 6200)
 	log.Printf("[gaokao-final-report] final len=%d err=%v", len(final), err)
 	if err != nil {
@@ -176,7 +188,7 @@ func callGaokaoFinalReportChat(ctx context.Context, provider string, prompt stri
 		}
 	}
 	if provider == "deepseek" && cfg.Model == "" {
-		cfg.Model = "deepseek-chat"
+		cfg.Model = "deepseek-v4-pro"
 	}
 	body := map[string]interface{}{
 		"model":    cfg.Model,
@@ -227,5 +239,17 @@ func cleanGaokaoFinalReportMarkdown(text string) string {
 	for _, token := range bad {
 		text = strings.ReplaceAll(text, token, "")
 	}
+	// 用户端报告不展示原始 URL/域名来源码；来源可放在单独来源区，不塞进表格单元格。
+	text = regexp.MustCompile(`\((?:https?://)?[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^)]*\)`).ReplaceAllString(text, "")
+	text = regexp.MustCompile(`\[[^\]]+\]\(https?://[^)]+\)`).ReplaceAllString(text, "")
+	text = regexp.MustCompile(`https?://\S+`).ReplaceAllString(text, "")
+	text = strings.ReplaceAll(text, "utm_source=openai", "")
+	for _, token := range []string{"（专业最低位次待核验）", "(专业最低位次待核验)", "专业最低位次待核验", "[专业最低位次:待核验]"} {
+		text = strings.ReplaceAll(text, token, "")
+	}
 	return strings.TrimSpace(text)
+}
+
+func SanitizeGaokaoFinalReportMarkdown(text string) string {
+	return cleanGaokaoFinalReportMarkdown(text)
 }

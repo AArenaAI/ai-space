@@ -134,7 +134,7 @@ export function prepareSingleSendMessages<TMessage extends SingleSendMessageLike
   }) as TMessage;
   userMessage.clientMessageId = userMessage.id;
   userMessage.localRunId = localRunId;
-  userMessage.sendStatus = "submitting";
+  userMessage.sendStatus = "local_committed";
   const assistantMessage = createAssistantChatMessage({
     id: createId(),
     model: modelId,
@@ -202,6 +202,9 @@ export type RunSingleChatInitOptions<TAssistant extends SingleSendMessageLike> =
   messageFileIds?: string[];
   notebookFileIds?: number[];
   fallbackId: () => string;
+  clientMessageId?: string;
+  localRunId?: string;
+  sendStatus?: string;
   fetchImpl?: typeof fetch;
 };
 
@@ -222,6 +225,9 @@ export async function runSingleChatInit<TAssistant extends SingleSendMessageLike
   messageFileIds,
   notebookFileIds,
   fallbackId,
+  clientMessageId,
+  localRunId,
+  sendStatus,
   fetchImpl = fetch,
 }: RunSingleChatInitOptions<TAssistant>): Promise<ChatInitResponse<TAssistant>> {
   const response = await fetchImpl(`${apiBaseUrl}/api/chat/init`, {
@@ -243,6 +249,9 @@ export async function runSingleChatInit<TAssistant extends SingleSendMessageLike
         messageFileIds,
         notebookFileIds,
         clientTimezone: getClientTimezone(),
+        clientMessageId,
+        localRunId,
+        sendStatus,
       }),
       stream: true,
       init_only: true,

@@ -74,15 +74,15 @@ func gaokaoAdvisorModelConfig(provider string) (gaokaoAdvisorModelCfg, bool) {
 			base = strings.TrimRight(strings.TrimSpace(os.Getenv("DOC_GEN_BASE_URL")), "/")
 		}
 		// Advisor needs fast bounded analysis, not the slower document-generation model.
-		// Use DEEPSEEK_MODEL only when explicitly set; otherwise fall back to deepseek-chat.
+		// Use DEEPSEEK_MODEL only when explicitly set; otherwise fall back to deepseek-v4-pro.
 		if model == "" {
-			model = "deepseek-chat"
+			model = "deepseek-v4-pro"
 		}
 	}
 	if model == "" {
 		switch prefix {
 		case "DEEPSEEK":
-			model = "deepseek-chat"
+			model = "deepseek-v4-pro"
 		case "MOONSHOT":
 			model = "moonshot-v1-8k"
 		case "GEMINI":

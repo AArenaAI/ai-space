@@ -15,6 +15,7 @@ export interface ModuleSidebarItem {
   href: string;
   matchPath: string;
   matchQuery?: string;
+  disabled?: boolean;
 }
 
 export interface ModuleSidebarGroup {
@@ -173,22 +174,44 @@ export default function ModuleSidebar({ groups, storageKey }: ModuleSidebarProps
                   const active =
                     (pathname === item.matchPath || pathname.startsWith(item.matchPath + "/")) &&
                     (hrefQuery ? search === hrefQuery : true);
+                  const disabled = !!item.disabled;
                   const Icon = item.icon;
+                  const commonClassName = cn(
+                    "flex items-center rounded-xl text-sm font-normal transition-all duration-150",
+                    collapsed ? "justify-center px-2 py-2.5" : "gap-2.5 px-3 py-2.5",
+                    disabled
+                      ? "cursor-not-allowed text-slate-400 opacity-45 grayscale dark:text-text-tertiary"
+                      : active
+                        ? "bg-surface-card text-slate-900 font-medium shadow-sm dark:text-text-primary"
+                        : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
+                  );
+                  const children = (
+                    <>
+                      <Icon className={cn("h-4 w-4 shrink-0", disabled ? "text-slate-400 dark:text-text-tertiary" : active ? "text-text-primary" : "text-text-tertiary")} />
+                      {!collapsed && <span className="truncate">{t(item.labelKey)}</span>}
+                      {!collapsed && disabled && <span className="ml-auto rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] text-text-tertiary">暂未开放</span>}
+                    </>
+                  );
+                  if (disabled) {
+                    return (
+                      <span
+                        key={`${item.labelKey}:${item.href}`}
+                        title={`${t(item.labelKey)} · 暂未开放`}
+                        aria-disabled="true"
+                        className={commonClassName}
+                      >
+                        {children}
+                      </span>
+                    );
+                  }
                   return (
                     <Link
                       key={`${item.labelKey}:${item.href}`}
                       href={item.href}
                       title={t(item.labelKey)}
-                      className={cn(
-                        "flex items-center rounded-xl text-sm font-normal transition-all duration-150",
-                        collapsed ? "justify-center px-2 py-2.5" : "gap-2.5 px-3 py-2.5",
-                        active
-                          ? "bg-surface-card text-slate-900 font-medium shadow-sm dark:text-text-primary"
-                          : "text-slate-500 hover:bg-surface-card hover:text-slate-900 dark:text-text-secondary dark:hover:text-text-primary"
-                      )}
+                      className={commonClassName}
                     >
-                      <Icon className={cn("h-4 w-4 shrink-0", active ? "text-text-primary" : "text-text-tertiary")} />
-                      {!collapsed && <span className="truncate">{t(item.labelKey)}</span>}
+                      {children}
                     </Link>
                   );
                 })}

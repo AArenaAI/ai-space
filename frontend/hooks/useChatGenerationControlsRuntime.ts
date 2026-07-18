@@ -50,6 +50,7 @@ type StopGenerationDeps = {
   apiBaseUrl: string;
   messages: Message[];
   currentConversation?: number;
+  setMessages: Dispatch<SetStateAction<Message[]>>;
   taskStreamsRef: MutableRefObject<Record<string, AbortController>>;
   abortControllerRef: MutableRefObject<AbortController | null>;
   compareAbortControllersRef: MutableRefObject<AbortController[]>;
@@ -65,6 +66,7 @@ export function createStopGenerationAction({
   apiBaseUrl,
   messages,
   currentConversation,
+  setMessages,
   taskStreamsRef,
   abortControllerRef,
   compareAbortControllersRef,
@@ -84,7 +86,7 @@ export function createStopGenerationAction({
       headers["X-Guest-ID"] = getGuestId();
     }
 
-    runStopGeneration({
+    const plan = runStopGeneration({
       messages,
       callbacks: {
         cancelTask: (taskId) => {
@@ -115,6 +117,28 @@ export function createStopGenerationAction({
         },
       },
     });
+    const taskIdsToStop = plan?.taskIds || [];
+    if (taskIdsToStop.length > 0) {
+      setMessages((prev) => {
+        const taskIds = new Set(taskIdsToStop);
+        const stoppedAt = Date.now();
+        const next = prev.map((message) => {
+          if (message.role !== "assistant" || !message.generationTaskId || !taskIds.has(message.generationTaskId)) return message;
+          return {
+            ...message,
+            completedAt: message.completedAt || stoppedAt,
+            generationStatus: "stopped" as const,
+            serverGenerationStatus: "cancelled",
+            phase: "stopped" as const,
+            stopped: true,
+            activityStatus: undefined,
+          };
+        });
+        syncGenerationControlMessagesToRuntime(currentConversation, next);
+        return next;
+      });
+      clearGenerationControlActivity(currentConversation);
+    }
   };
 }
 
@@ -426,6 +450,7 @@ export function useChatGenerationControlsRuntime(options: UseChatGenerationContr
       options.apiBaseUrl,
       options.messages,
       options.currentConversation,
+      options.setMessages,
       options.taskStreamsRef,
       options.abortControllerRef,
       options.compareAbortControllersRef,

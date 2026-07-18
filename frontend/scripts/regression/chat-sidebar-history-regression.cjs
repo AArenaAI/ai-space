@@ -1,44 +1,14 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 
-function loadModule() {
-  const sourcePath = path.join(__dirname, '../../lib/chatSidebarHistory.ts');
-  let source = fs.readFileSync(sourcePath, 'utf8');
-  source = source
-    .replace(/export type ChatSidebarConversation = \{[\s\S]*?\};\n\n/, '')
-    .replace(/export type ChatSidebarActivityUpdate = \{[\s\S]*?\};\n\n/, '')
-    .replace(/export const CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE = 500;/, 'exports.CHAT_SIDEBAR_CONVERSATION_PAGE_SIZE = 500;')
-    .replace(/export function sortSidebarConversations<T extends ChatSidebarConversation>\(conversations: T\[\]\): T\[\] \{/, 'function sortSidebarConversations(conversations) {')
-    .replace(/export function mergeSidebarConversations<T extends ChatSidebarConversation>\(current: T\[\], incoming: T\[\]\): T\[\] \{/, 'function mergeSidebarConversations(current, incoming) {')
-    .replace(/export function applySidebarConversationActivity<T extends ChatSidebarConversation>\(current: T\[\], update: ChatSidebarActivityUpdate\): T\[\] \{/, 'function applySidebarConversationActivity(current, update) {')
-    .replace(/export function hasMoreSidebarConversations\(currentCount: number, nextOffset: number, total\?: number, hasMore\?: boolean\) \{/, 'function hasMoreSidebarConversations(currentCount, nextOffset, total, hasMore) {')
-    .replace(/export function parseSidebarCursor\(cursor\?: string\) \{/, 'function parseSidebarCursor(cursor) {')
-    .replace(/: ChatSidebarConversation\[\]/g, '')
-    .replace(/: ChatSidebarActivityUpdate/g, '')
-    .replace(/: number/g, '')
-    .replace(/\?: string/g, '')
-    .replace(/\?: number/g, '')
-    .replace(/: string/g, '')
-    .replace(/new Map<number, T>\(\)/g, 'new Map()')
-    .replace(/ as T/g, '');
-  source += '\nexports.sortSidebarConversations = sortSidebarConversations;';
-  source += '\nexports.mergeSidebarConversations = mergeSidebarConversations;';
-  source += '\nexports.applySidebarConversationActivity = applySidebarConversationActivity;';
-  source += '\nexports.hasMoreSidebarConversations = hasMoreSidebarConversations;';
-  source += '\nexports.parseSidebarCursor = parseSidebarCursor;';
-  const exports = {};
-  vm.runInNewContext(source, { exports, Date, Map, Number });
-  return exports;
-}
-
+(async () => {
 const {
   mergeSidebarConversations,
   applySidebarConversationActivity,
   hasMoreSidebarConversations,
   parseSidebarCursor,
-} = loadModule();
+} = await import('../../lib/chatSidebarHistory.ts');
 
 (function staleBootstrapCannotDowngradeLocalActivity() {
   const current = [
@@ -80,4 +50,22 @@ const {
   });
 })();
 
+(function canonicalFirstPageMustMergeInsteadOfReplace() {
+  const hookPath = path.join(__dirname, '../../hooks/useChatSidebarHistory.ts');
+  const hook = fs.readFileSync(hookPath, 'utf8');
+  assert.ok(
+    hook.includes('mergeSidebarConversations(prev, page.conversations)'),
+    'canonical /conversations first page must merge/upsert instead of replacing bootstrap/sidebar state'
+  );
+  assert.equal(
+    hook.includes('setConversations(sortSidebarConversations(page.conversations))'),
+    false,
+    'canonical /conversations first page replacement causes visible sidebar second-refresh/shrink regressions'
+  );
+})();
+
 console.log('chat sidebar history regression passed');
+})().catch((error) => {
+  console.error(error.stack || error.message);
+  process.exit(1);
+});

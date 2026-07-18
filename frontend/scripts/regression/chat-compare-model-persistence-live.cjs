@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const apiBaseUrl = trim(env('COMPARE_PERSIST_API_BASE_URL', env('REAL_CHAT_API_BASE_URL', env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz'))));
 const frontendBaseUrl = trim(env('COMPARE_PERSIST_FRONTEND_BASE_URL', env('REAL_CHAT_FRONTEND_BASE_URL', apiBaseUrl)));
@@ -24,7 +24,7 @@ function parseCompareModels(value) {
 async function apiJson(path, token, init = {}) {
   const res = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -63,16 +63,16 @@ async function waitForPostBody(page, urlPattern, timeout = 30000) {
   try {
     assert(initialModels.length === 2 && targetModels.length === 2, 'Need two initial and two target models');
     auth = await login({ baseUrl: apiBaseUrl });
-    conversation = await apiJson('/api/conversations', auth.token, {
+    conversation = await apiJson('/api/conversations', auth, {
       method: 'POST',
       body: JSON.stringify({ title: `compare persist live ${startedAt}`, model: initialModels[0], compare: true, compare_models: JSON.stringify(initialModels) }),
     });
-    await apiJson(`/api/conversations/${conversation.id}`, auth.token, {
+    await apiJson(`/api/conversations/${conversation.id}`, auth, {
       method: 'PUT',
       body: JSON.stringify({ compare: true, compare_models: JSON.stringify(initialModels) }),
     });
 
-    const opened = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
+    const opened = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
     browser = opened.browser;
     const page = opened.page;
     const consoleEvents = [];
@@ -104,7 +104,7 @@ async function waitForPostBody(page, urlPattern, timeout = 30000) {
     await page.waitForTimeout(1500);
     const afterSelectHeaderModels = await header.locator('[data-testid="model-selector-trigger"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-model-id')));
     const storageAfterSelect = await page.evaluate(() => ({ mode: localStorage.getItem('compare-mode'), models: localStorage.getItem('compare-models') }));
-    const persistedAfterSelectData = await apiJson(`/api/conversations/${conversation.id}?message_tail=2`, auth.token);
+    const persistedAfterSelectData = await apiJson(`/api/conversations/${conversation.id}?message_tail=2`, auth);
     const persistedAfterSelect = parseCompareModels(persistedAfterSelectData.compare_models || persistedAfterSelectData.conversation?.compare_models);
 
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -139,7 +139,7 @@ async function waitForPostBody(page, urlPattern, timeout = 30000) {
   } finally {
     await browser?.close().catch(() => {});
     if (conversation?.id && auth?.token) {
-      result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] }).catch((error) => ({ error: error.message }));
+      result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] }).catch((error) => ({ error: error.message }));
     }
   }
   printResult(result);

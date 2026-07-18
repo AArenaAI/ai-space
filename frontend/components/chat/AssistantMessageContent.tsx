@@ -69,6 +69,11 @@ function mayStillRecoverMessage(msg: Message) {
   );
 }
 
+function isStoppedSystemNotice(content?: string) {
+  const text = (content || "").trim();
+  return text === "生成已停止" || text === "生成已中断，可以重新生成这条回答。" || text === "Generation was interrupted. You can regenerate this reply.";
+}
+
 export function AssistantMessageContent({
   message,
   isStreaming,
@@ -167,8 +172,22 @@ export function AssistantMessageContent({
     return () => window.clearTimeout(timer);
   }, [finalizingRealtime, generating, message.id, runtimeState.reasoningContent]);
 
+  const hasStoppedVisibleContent = [
+    message.content,
+    message.reasoningContent,
+    runtimeState.content,
+    runtimeState.answerContent,
+    runtimeState.reasoningContent,
+  ].some((value) => {
+    const text = (value || "").trim();
+    return Boolean(text && !isStoppedSystemNotice(text));
+  });
+  if (message.stopped && !hasStoppedVisibleContent) {
+    return null;
+  }
+
   const failureMessage = { ...message, content: runtimeState.content || message.content, errorCode: runtimeState.errorCode || message.errorCode, phase: runtimeState.phase };
-  if (isAssistantFailureState(failureMessage)) {
+  if (!message.stopped && isAssistantFailureState(failureMessage)) {
     const sourceCount = normalizeSearchSources(runtimeState.searchSources).length || runtimeState.searchSourcesCount || 0;
     return (
       <>

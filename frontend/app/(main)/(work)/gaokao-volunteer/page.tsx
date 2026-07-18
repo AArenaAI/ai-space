@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AlignmentType, BorderStyle, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import {
   AlertTriangle,
   ArrowRight,
@@ -158,8 +159,30 @@ type ReportHistoryItem = {
   id: string;
   title: string;
   subtitle: string;
-  createdAtLabel: string;
+  createdAtLabel?: string;
+  createdAt?: string;
+  track?: "本科" | "专科" | string;
   result: any;
+};
+
+const formatHistoryTime = (createdAt?: string, fallback?: string) => {
+  if (!createdAt) return fallback || "刚刚";
+  const time = new Date(createdAt).getTime();
+  if (!Number.isFinite(time)) return fallback || "刚刚";
+  const diff = Math.max(0, Date.now() - time);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < minute) return "刚刚";
+  if (diff < hour) return `${Math.floor(diff / minute)}分钟前`;
+  if (diff < 2 * hour) return "1小时前";
+  if (diff < day) return `${Math.floor(diff / hour)}小时前`;
+  if (diff < 2 * day) return "1天前";
+  if (diff < 7 * day) return `${Math.floor(diff / day)}天前`;
+  if (diff < 14 * day) return "一周前";
+  if (diff < 30 * day) return `${Math.floor(diff / (7 * day))}周前`;
+  if (diff < 60 * day) return "一个月前";
+  return `${Math.floor(diff / (30 * day))}个月前`;
 };
 
 const defaultProfile: StudentProfile = {
@@ -545,6 +568,86 @@ function normalizeApiRecommendation(item: any): Recommendation {
   };
 }
 
+const wordTableBorders = {
+  top: { style: BorderStyle.SINGLE, size: 1, color: "D0D7DE" },
+  bottom: { style: BorderStyle.SINGLE, size: 1, color: "D0D7DE" },
+  left: { style: BorderStyle.SINGLE, size: 1, color: "D0D7DE" },
+  right: { style: BorderStyle.SINGLE, size: 1, color: "D0D7DE" },
+  insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: "D0D7DE" },
+  insideVertical: { style: BorderStyle.SINGLE, size: 1, color: "D0D7DE" },
+};
+
+const markdownInlineRuns = (text: string, opts?: { bold?: boolean }) => {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part) => {
+    const strong = part.startsWith("**") && part.endsWith("**");
+    return new TextRun({ text: strong ? part.slice(2, -2) : part, bold: opts?.bold || strong, size: 22, font: "Microsoft YaHei" });
+  });
+};
+
+const markdownToWordChildren = (markdown: string) => {
+  const children: Array<Paragraph | Table> = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
+    const line = raw.trim();
+    if (!line || line === "---") {
+      children.push(new Paragraph({ spacing: { after: 80 } }));
+      continue;
+    }
+    if (line.startsWith("|")) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        const current = lines[i].trim();
+        if (!/^\|\s*:?-{3,}:?/.test(current)) tableLines.push(current);
+        i += 1;
+      }
+      i -= 1;
+      const rows = tableLines.map((tableLine, rowIndex) => {
+        const cells = tableLine.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+        return new TableRow({
+          children: cells.map((cell) => new TableCell({
+            shading: rowIndex === 0 ? { fill: "EEF4FF" } : undefined,
+            margins: { top: 100, bottom: 100, left: 100, right: 100 },
+            children: [new Paragraph({ children: markdownInlineRuns(cell, { bold: rowIndex === 0 }) })],
+          })),
+        });
+      });
+      if (rows.length) children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: wordTableBorders, rows }));
+      continue;
+    }
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length;
+      children.push(new Paragraph({
+        heading: level === 1 ? HeadingLevel.HEADING_1 : level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3,
+        spacing: { before: level === 1 ? 120 : 180, after: 100 },
+        children: markdownInlineRuns(heading[2], { bold: true }),
+      }));
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      children.push(new Paragraph({ bullet: { level: 0 }, spacing: { after: 80 }, children: markdownInlineRuns(line.replace(/^[-*]\s+/, "")) }));
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      children.push(new Paragraph({ numbering: { reference: "report-numbering", level: 0 }, spacing: { after: 80 }, children: markdownInlineRuns(line.replace(/^\d+\.\s+/, "")) }));
+      continue;
+    }
+    children.push(new Paragraph({ spacing: { after: 100 }, children: markdownInlineRuns(line.replace(/^>\s*/, "")) }));
+  }
+  return children;
+};
+
+const buildAdvisorReportDocxBlob = async (markdown: string) => {
+  const doc = new Document({
+    styles: { default: { document: { run: { font: "Microsoft YaHei" }, paragraph: { spacing: { line: 320 } } } } },
+    numbering: { config: [{ reference: "report-numbering", levels: [{ level: 0, format: "decimal", text: "%1.", alignment: AlignmentType.LEFT }] }] },
+    sections: [{ properties: {}, children: markdownToWordChildren(markdown) }],
+  });
+  return Packer.toBlob(doc);
+};
+
 export default function GaokaoVolunteerPage() {
   const { t } = useI18n();
   const [profile, setProfile] = useState<StudentProfile>(defaultProfile);
@@ -576,6 +679,8 @@ export default function GaokaoVolunteerPage() {
   const [coverageSummary, setCoverageSummary] = useState<any>(null);
   const [advisorResult, setAdvisorResult] = useState<any>(null);
   const [reportHistory, setReportHistory] = useState<ReportHistoryItem[]>([]);
+  const [reportHistoryReady, setReportHistoryReady] = useState(false);
+  const [, setHistoryClock] = useState(0);
   const [openReportMenuId, setOpenReportMenuId] = useState<string | null>(null);
   const [advisorEvents, setAdvisorEvents] = useState<Array<{ type: string; text: string }>>([]);
   const [activeDocument, setActiveDocument] = useState<"report" | "sources" | "candidates">("report");
@@ -612,6 +717,31 @@ export default function GaokaoVolunteerPage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem("gaokao-report-history");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setReportHistory(Array.isArray(parsed) ? parsed.map((item) => {
+          if (item?.createdAt) return item;
+          const timestamp = Number(String(item?.id || "").split("-")[0]);
+          return Number.isFinite(timestamp) && timestamp > 0 ? { ...item, createdAt: new Date(timestamp).toISOString() } : item;
+        }) : []);
+      }
+    } catch {}
+    setReportHistoryReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!reportHistoryReady) return;
+    try { localStorage.setItem("gaokao-report-history", JSON.stringify(reportHistory.slice(0, 50))); } catch {}
+  }, [reportHistory, reportHistoryReady]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setHistoryClock((value) => value + 1), 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!guideLoading) return;
     setGuideProgress(8);
     const timer = window.setInterval(() => {
@@ -634,6 +764,14 @@ export default function GaokaoVolunteerPage() {
     .replace(/\s{2,}/g, " ")
     .trim();
 
+  const cleanAdvisorMarkdown = (value: unknown) => String(value ?? "")
+    .replace(/\((?:https?:\/\/)?[A-Za-z0-9.-]+\.[A-Za-z]{2,}[^)]*\)/g, "")
+    .replace(/\[[^\]]+\]\(https?:\/\/[^)]+\)/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/utm_source=openai/gi, "")
+    .replace(/（专业最低位次待核验）|\(专业最低位次待核验\)|专业最低位次待核验|\[专业最低位次:待核验\]/g, "")
+    .trim();
+
   const guideRecordToMarkdown = (record: any) => {
     if (typeof record.data === "string") return cleanGuideText(record.data);
     const d = record.data || {};
@@ -643,15 +781,17 @@ export default function GaokaoVolunteerPage() {
     return `# ${cleanGuideText(d.title || record.title)}\n\n${cleanGuideText(d.summary || "")}\n\n## 推荐表格\n\n${header}\n${sep}\n${rows}\n\n## 匹配度\n${(d.bar_chart?.items || []).map((i: any) => `- ${i.label}: ${i.value}`).join("\n")}\n\n## 因素权重\n${(d.pie_chart?.items || []).map((i: any) => `- ${i.label}: ${i.value}%`).join("\n")}\n\n## 趋势\n${(d.trend_chart?.items || []).map((i: any) => `- ${i.label}: ${i.value}`).join("\n")}\n\n## 下一步\n${(d.next_steps || []).map((s: string) => `- ${s}`).join("\n")}`;
   };
 
-  const downloadGuideRecord = (record: any) => {
+  const downloadGuideRecord = async (record: any) => {
     const content = guideRecordToMarkdown(record);
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const blob = await buildAdvisorReportDocxBlob(content);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${record.title || "高考推荐文档"}.md`;
+    const filename = cleanGuideText(record.mode || record.title || "高考推荐文档").replace(/[\\/:*?"<>|]/g, "-");
+    a.download = `${filename || "高考推荐文档"}.docx`;
     a.click();
     URL.revokeObjectURL(url);
+    toast.success("Word 文档已下载");
   };
 
   useEffect(() => {
@@ -879,7 +1019,76 @@ export default function GaokaoVolunteerPage() {
 
 
 
-  const runAdvisor = async (profileOverride?: StudentProfile, messageOverride?: string, trackOverride?: "本科" | "专科" | null) => {
+  const profileDraftKey = (track: string) => `gaokao-${track}-profile-draft`;
+
+  const loadProfileDraft = (track: string): StudentProfile | null => {
+    try {
+      const raw = localStorage.getItem(profileDraftKey(track));
+      if (!raw) return null;
+      return { ...defaultProfile, ...JSON.parse(raw) };
+    } catch {
+      return null;
+    }
+  };
+
+  const saveProfileDraft = (track: string, value: StudentProfile) => {
+    try { localStorage.setItem(profileDraftKey(track), JSON.stringify(value)); } catch {}
+  };
+
+  const saveActiveAdvisorTask = (track: string, taskId: string | null) => {
+    try {
+      const raw = localStorage.getItem("gaokao-active-advisor-tasks");
+      const tasks = raw ? JSON.parse(raw) : {};
+      if (taskId) tasks[track] = taskId; else delete tasks[track];
+      localStorage.setItem("gaokao-active-advisor-tasks", JSON.stringify(tasks));
+    } catch {}
+  };
+
+  const pollAdvisorTask = async (taskId: string, requestTrack: "本科" | "专科" | string) => {
+    setAdvisorLoading(true);
+    setActiveDocument("report");
+    for (let i = 0; i < 240; i += 1) {
+      const response = await fetch(`/api/gaokao/advisor/tasks/${taskId}`);
+      if (!response.ok) throw new Error("task poll failed");
+      const task = await response.json();
+      setReportStage(task.stage || "生成中");
+      setReportProgress(Number(task.progress) || 8);
+      if (Array.isArray(task.events)) setAdvisorEvents(task.events.map((event: any) => ({ type: "task", text: String(event.text || "生成中") })));
+      if (task.status === "done") {
+        const data = task.result;
+        setAdvisorResult(data);
+        const item: ReportHistoryItem = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: `${requestTrack || "本科"}专项志愿规划报告`, subtitle: "报告 · 院校 · 来源", createdAt: new Date().toISOString(), track: requestTrack, result: data };
+        setReportHistory((prev) => [item, ...prev].slice(0, 50));
+        saveActiveAdvisorTask(String(requestTrack), null);
+        setReportProgress(100);
+        setReportStage("生成完成");
+        setAdvisorLoading(false);
+        return;
+      }
+      if (task.status === "error") throw new Error(task.error || "task failed");
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+    throw new Error("task timeout");
+  };
+
+  useEffect(() => {
+    if (!activeTrack) return;
+    saveProfileDraft(activeTrack, profile);
+  }, [activeTrack, profile]);
+
+  useEffect(() => {
+    if (!activeTrack) return;
+    try {
+      const raw = localStorage.getItem("gaokao-active-advisor-tasks");
+      const tasks = raw ? JSON.parse(raw) : {};
+      const taskId = tasks[activeTrack];
+      if (taskId && !advisorLoading) {
+        pollAdvisorTask(taskId, activeTrack).catch(() => saveActiveAdvisorTask(activeTrack, null));
+      }
+    } catch {}
+  }, [activeTrack]);
+
+  const runAdvisor = async (profileOverride?: StudentProfile, messageOverride?: string, trackOverride?: "本科" | "专科" | null, modelOverride = "committee") => {
     const activeProfile = profileOverride ?? profile;
     const requestTrack = trackOverride ?? activeTrack;
     const missingRequired = [
@@ -912,7 +1121,7 @@ export default function GaokaoVolunteerPage() {
           profile: profileToApiShape(activeProfile),
           message: activeMessage,
           allow_web_lookup: true,
-          model: "committee",
+          model: modelOverride,
           track: requestTrack || "",
         }),
       });
@@ -996,18 +1205,19 @@ export default function GaokaoVolunteerPage() {
               id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               title: `${requestTrack || activeTrack || "本科"}专项志愿规划报告`,
               subtitle: "报告 · 院校 · 来源",
-              createdAtLabel: "刚刚",
+              createdAt: new Date().toISOString(),
+              track: requestTrack || activeTrack || "本科",
               result: data,
             };
             setReportHistory((prev) => [item, ...prev].slice(0, 20));
             updateReportProgress("生成完成", 100);
-            pushEvent(type, "Advisor 已完成");
+            pushEvent(type, "专属志愿报告已完成");
           }
         }
       }
-      toast.success("Advisor 已生成实时方案");
+      toast.success("已生成专属志愿报告");
     } catch {
-      toast.error("Advisor 分析失败，请稍后重试");
+      toast.error("专属志愿报告生成失败，请稍后重试");
     } finally {
       setAdvisorLoading(false);
     }
@@ -1087,13 +1297,15 @@ export default function GaokaoVolunteerPage() {
 
   const enterTrack = (track: "本科" | "专科") => {
     setActiveTrack(track);
+    const draft = loadProfileDraft(track);
+    setProfile(draft || defaultProfile);
     setSelectedBand("全部");
     setAdvisorResult(null);
     setAdvisorEvents([]);
     setApiRecommendations(null);
     setRecommendError(null);
     setDataSourceNote("");
-    setMessages([{ role: "assistant", content: `已进入${track}专项。请先在左侧填写要求，点击右侧“生成报告”后我再开始分析。` }]);
+    setMessages([{ role: "assistant", content: `已进入${track}专项。你可以先和我聊目标、偏好、顾虑，我会先记录和追问；等你确认“按这个生成报告”时，再生成右侧文档。` }]);
   };
 
   const handlePageBack = () => {
@@ -1122,7 +1334,7 @@ export default function GaokaoVolunteerPage() {
       const response = await fetch("/api/gaokao/agent-adjust", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: text, profile: profileToApiShape(profile) }),
+        body: JSON.stringify({ command: text, profile: profileToApiShape(profile), track: activeTrack || "", history: messages.slice(-12).map((m) => ({ role: m.role, content: m.content })) }),
       });
       if (!response.ok) throw new Error("agent failed");
       const data = await response.json();
@@ -1145,29 +1357,35 @@ export default function GaokaoVolunteerPage() {
         const base = prev.slice(0, -1);
         return [...base, { role: "assistant", content: `${reply}（后端 Agent 暂不可用，已使用本地降级解析。）` }];
       });
-      setMessages((prev) => [...prev, { role: "assistant", content: "正在按新条件重新生成方案..." }]);
-      await runAdvisor(next, text);
-      setMessages((prev) => [...prev, { role: "assistant", content: "方案已更新。" }]);
+      const shouldGenerate = /生成报告|生成方案|出方案|出报告|重写报告|重新生成|按这个生成|按这个出|开始生成|确认生成|就这样生成|可以生成了/.test(text);
+      if (shouldGenerate) {
+        setMessages((prev) => [...prev, { role: "assistant", content: "正在按新条件重新生成方案..." }]);
+        await runAdvisor(next, text);
+        setMessages((prev) => [...prev, { role: "assistant", content: "方案已更新。" }]);
+      }
     }
   };
 
   const resetProfile = () => {
+    if (activeTrack) {
+      try { localStorage.removeItem(profileDraftKey(activeTrack)); } catch {}
+    }
     setProfile(defaultProfile);
     setSelectedBand("全部");
     setMessages([{ role: "assistant", content: "已恢复默认样例档案。你可以继续修改位次、城市、专业和风险策略。" }]);
   };
 
-  const downloadAdvisorReport = (result: any) => {
-    const markdown = String(result?.final_report_markdown || "").trim();
+  const downloadAdvisorReport = async (result: any) => {
+    const markdown = cleanAdvisorMarkdown(result?.final_report_markdown || "");
     const content = markdown || `# ${activeTrack || "高考"}专项志愿规划报告\n\n暂无可下载的报告正文。`;
-    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const blob = await buildAdvisorReportDocxBlob(content);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `gaokao-advisor-report-${Date.now()}.md`;
+    a.download = "专科专项志愿规划报告.docx";
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("报告已下载");
+    toast.success("Word 报告已下载");
   };
 
   const deleteReportHistoryItem = (id: string) => {
@@ -1176,9 +1394,9 @@ export default function GaokaoVolunteerPage() {
     toast.success("已删除历史记录");
   };
 
-  const exportReport = () => {
+  const exportReport = async () => {
     if (advisorResult?.final_report_markdown) {
-      downloadAdvisorReport(advisorResult);
+      await downloadAdvisorReport(advisorResult);
       return;
     }
     const lines = [
@@ -1218,21 +1436,29 @@ export default function GaokaoVolunteerPage() {
         const cityIndex = headers.findIndex((h) => h.includes("城市"));
         const levelIndex = headers.findIndex((h) => h.includes("层次"));
         const majorIndex = headers.findIndex((h) => h.includes("推荐专业"));
-        if (schoolIndex < 0 || majorIndex < 0) return;
         [cityIndex, levelIndex].filter((idx) => idx >= 0).forEach((idx) => {
           (headerCells[idx] as HTMLElement).style.display = "none";
         });
         table.querySelectorAll("tbody tr").forEach((row) => {
-          const cells = Array.from(row.children) as HTMLElement[];
-          const city = cityIndex >= 0 ? (cells[cityIndex]?.textContent || "").trim() : "";
-          const level = levelIndex >= 0 ? (cells[levelIndex]?.textContent || "").trim() : "";
+          const cells = Array.from(row.querySelectorAll("td")) as HTMLElement[];
+          const city = cells[cityIndex]?.textContent?.trim() || "";
+          const level = cells[levelIndex]?.textContent?.trim() || "";
           [cityIndex, levelIndex].filter((idx) => idx >= 0).forEach((idx) => {
             if (cells[idx]) cells[idx].style.display = "none";
           });
-          if (cells[schoolIndex]) {
-            cells[schoolIndex].title = [city && `城市：${city}`, level && `层次：${level}`].filter(Boolean).join("\n");
-            cells[schoolIndex].classList.add("cursor-help", "font-medium", "text-text-primary", "decoration-dotted", "underline-offset-4", "hover:underline");
-          }
+        if (schoolIndex >= 0 && cells[schoolIndex] && !cells[schoolIndex].dataset.tooltipReady) {
+          cells[schoolIndex].dataset.tooltipReady = "true";
+          const school = cells[schoolIndex].textContent?.trim() || "";
+          cells[schoolIndex].textContent = "";
+          const schoolChip = document.createElement("span");
+          schoolChip.className = "group relative inline-flex cursor-default font-medium text-text-primary";
+          schoolChip.textContent = school;
+          const schoolTip = document.createElement("span");
+          schoolTip.className = "pointer-events-none absolute left-0 top-full z-[80] mt-1 hidden min-w-44 max-w-72 rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-left text-xs leading-5 text-text-secondary shadow-xl group-hover:block";
+          schoolTip.textContent = [city && `城市：${city}`, level && `层次：${level}`].filter(Boolean).join("；") || "暂无补充信息";
+          schoolChip.appendChild(schoolTip);
+          cells[schoolIndex].appendChild(schoolChip);
+        }
           const majorCell = cells[majorIndex];
           if (majorCell && !majorCell.dataset.tooltipReady) {
             majorCell.dataset.tooltipReady = "true";
@@ -1245,8 +1471,12 @@ export default function GaokaoVolunteerPage() {
                 const majorRank = match?.[2] || "";
                 const chip = document.createElement("span");
                 chip.textContent = major;
-                chip.title = majorRank ? `${major}\n去年该专业录取最低位次：${majorRank}` : `${major}\n去年该专业录取最低位次：待核验`;
-                chip.className = "mr-1.5 mb-1 inline-flex cursor-help rounded-full border border-surface-border bg-surface-elevated/70 px-2 py-0.5 text-[11px] text-text-secondary hover:border-neutral-400 hover:text-text-primary";
+                if (majorRank) chip.dataset.majorRank = majorRank;
+                chip.className = "group relative mr-1.5 mb-1 inline-flex rounded-full border border-surface-border bg-surface-elevated/70 px-2 py-0.5 text-[11px] text-text-secondary hover:border-neutral-400 hover:text-text-primary";
+                const tip = document.createElement("span");
+                tip.className = "pointer-events-none absolute left-0 top-full z-50 mt-1 hidden min-w-44 max-w-64 rounded-xl border border-surface-border bg-surface-card px-3 py-2 text-left text-xs leading-5 text-text-secondary shadow-xl group-hover:block";
+                tip.textContent = majorRank ? `该专业最低位次：${majorRank}` : `该专业最低位次：暂无明确数据`;
+                chip.appendChild(tip);
                 majorCell.appendChild(chip);
               });
             }
@@ -1387,6 +1617,7 @@ export default function GaokaoVolunteerPage() {
     { label: "生成终稿", start: 85, doneAt: 100 },
   ];
   const activeReportStep = reportSteps.find((step) => reportProgress >= step.start && reportProgress <= step.doneAt) || reportSteps[reportSteps.length - 1];
+  const visibleReportHistory = activeTrack ? reportHistory.filter((item) => !item.track || item.track === activeTrack) : reportHistory;
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-hidden bg-surface text-text-primary md:h-screen">
@@ -1493,13 +1724,13 @@ export default function GaokaoVolunteerPage() {
               {guideSubmitted && (
                 <div className="rounded-2xl border border-surface-border bg-surface-elevated/45 p-5">
                   <div className="text-lg font-semibold text-text-primary">{activeGuide.resultTitle}</div>
-                  <p className="mt-1 text-sm leading-6 text-text-tertiary">提交后由多智能体协同联网评估生成完整建议。</p>
+                  <p className="mt-1 text-sm leading-6 text-text-tertiary">提交后生成可下载的 Word 推荐文档。</p>
                   {guideLoading ? (
                     <div className="mt-4 rounded-2xl bg-surface-card px-5 py-5 text-sm leading-6 text-text-secondary">
                       <div className="flex items-center justify-between gap-3"><div className="font-semibold text-text-primary">多智能体协同评估中</div><div className="text-xs text-text-tertiary">{guideProgress}%</div></div>
                       <div className="mt-3 h-2 rounded-full bg-surface-elevated"><div className="h-2 rounded-full bg-neutral-950 transition-all duration-700 dark:bg-white" style={{ width: `${guideProgress}%` }} /></div>
                       <div className="mt-4 grid gap-2 text-xs text-text-tertiary md:grid-cols-4">
-                        {[{label:"整理问卷",done:guideProgress>=18},{label:"联网检索",done:guideProgress>=42},{label:"协同评估",done:guideProgress>=68},{label:"生成图表",done:guideProgress>=88}].map((step) => <div key={step.label} className={cn("rounded-xl border px-3 py-2", step.done ? "border-neutral-300 bg-surface-elevated text-text-primary" : "border-surface-border bg-surface")}>{step.done ? "✓ " : "· "}{step.label}</div>)}
+                        {[{label:"整理问卷",done:guideProgress>=18},{label:"分析偏好",done:guideProgress>=42},{label:"生成建议",done:guideProgress>=68},{label:"排版文档",done:guideProgress>=88}].map((step) => <div key={step.label} className={cn("rounded-xl border px-3 py-2", step.done ? "border-neutral-300 bg-surface-elevated text-text-primary" : "border-surface-border bg-surface")}>{step.done ? "✓ " : "· "}{step.label}</div>)}
                       </div>
                       <div className="mt-4 space-y-2">
                         <div className="h-3 w-4/5 animate-pulse rounded-full bg-surface-elevated" />
@@ -1508,14 +1739,24 @@ export default function GaokaoVolunteerPage() {
                       </div>
                     </div>
                   ) : guideData ? (
-                    <div className="mt-4 max-h-[64vh] space-y-5 overflow-y-auto text-base leading-7 text-text-secondary">
-                      <div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{cleanGuideText(guideData.title)}</div><p className="mt-1">{cleanGuideText(guideData.summary)}</p></div>
-                      <div className="space-y-3">
-                        {(guideData.table_rows || []).map((row: any) => <div key={row.name} className="rounded-2xl border border-surface-border bg-surface-card p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="text-lg font-semibold text-text-primary">{cleanGuideText(row.name)}</div><div className="rounded-full bg-neutral-950 px-3 py-1 text-sm text-white dark:bg-white dark:text-neutral-950">{row.score} 分</div></div><div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{(row.cells || []).map((cell: string, idx: number) => <div key={idx} className="rounded-xl bg-surface-elevated/60 p-3"><div className="mb-1 text-sm font-medium text-text-primary">{guideData.table_columns?.[idx] || `维度${idx + 1}`}</div><div className="text-sm leading-6 text-text-secondary break-words">{cleanGuideText(cell)}</div></div>)}</div></div>)}
+                    <div className="mt-4 max-h-[64vh] overflow-y-auto rounded-3xl bg-white p-6 text-base leading-7 text-neutral-700 shadow-sm dark:bg-surface dark:text-text-secondary">
+                      <div className="border-b border-surface-border pb-5">
+                        <div className="text-2xl font-bold tracking-tight text-neutral-950 dark:text-white">{cleanGuideText(guideData.title)}</div>
+                        <p className="mt-3 text-base leading-7 text-neutral-600 dark:text-text-secondary">{cleanGuideText(guideData.summary)}</p>
+                        <button type="button" onClick={() => downloadGuideRecord({ id: `${Date.now()}`, title: guideData.title || activeGuide.title, mode: activeGuide.title, createdAt: new Date().toISOString(), data: guideData })} className="mt-4 inline-flex items-center gap-2 rounded-full bg-neutral-950 px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-neutral-950"><Download className="h-4 w-4" />下载 Word</button>
                       </div>
-                      <div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{guideData.bar_chart?.title || "匹配度"}</div><div className="mt-3 space-y-2">{(guideData.bar_chart?.items || []).map((item: any) => <div key={item.label}><div className="mb-1 flex justify-between text-sm"><span className="break-words">{item.label}</span><span>{item.value}</span></div><div className="h-2 rounded-full bg-surface-elevated"><div className="h-2 rounded-full bg-neutral-900 dark:bg-white" style={{ width: `${Math.min(100, Math.max(0, Number(item.value) || 0))}%` }} /></div></div>)}</div></div>
-                      <div className="grid gap-3 md:grid-cols-2"><div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{guideData.pie_chart?.title || "因素权重"}</div><div className="mt-2 space-y-1">{(guideData.pie_chart?.items || []).map((item: any) => <div key={item.label} className="flex justify-between gap-3 text-sm"><span className="break-words">{item.label}</span><span>{item.value}%</span></div>)}</div></div><div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">{guideData.trend_chart?.title || "趋势"}</div><div className="mt-2 flex h-24 items-end gap-2">{(guideData.trend_chart?.items || []).map((item: any) => <div key={item.label} className="flex flex-1 flex-col items-center gap-1"><div className="w-full rounded-t bg-neutral-900 dark:bg-white" style={{ height: `${Math.max(8, Math.min(90, Number(item.value) || 0))}%` }} /><span className="max-w-24 break-words text-center text-xs text-text-tertiary">{item.label}</span></div>)}</div></div></div>
-                      <div className="rounded-xl bg-surface-card px-4 py-3"><div className="font-semibold text-text-primary">下一步</div><ul className="mt-2 list-disc space-y-1 pl-5">{(guideData.next_steps || []).map((step: string) => <li key={step}>{step}</li>)}</ul></div>
+                      <div className="mt-6 overflow-x-auto rounded-2xl border border-surface-border">
+                        <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                          <thead className="bg-blue-50 text-neutral-950 dark:bg-blue-950/30 dark:text-white"><tr><th className="px-4 py-3">项目</th><th className="px-4 py-3">分数</th>{(guideData.table_columns || []).map((col: string) => <th key={col} className="px-4 py-3">{col}</th>)}</tr></thead>
+                          <tbody>{(guideData.table_rows || []).map((row: any) => <tr key={row.name} className="border-t border-surface-border align-top"><td className="px-4 py-3 font-semibold text-neutral-950 dark:text-white">{cleanGuideText(row.name)}</td><td className="px-4 py-3"><span className="rounded-full bg-neutral-950 px-2.5 py-1 text-xs text-white dark:bg-white dark:text-neutral-950">{row.score} 分</span></td>{(row.cells || []).map((cell: string, idx: number) => <td key={idx} className="max-w-[260px] px-4 py-3 leading-6 text-neutral-600 dark:text-text-secondary">{cleanGuideText(cell)}</td>)}</tr>)}</tbody>
+                        </table>
+                      </div>
+                      <div className="mt-6 grid gap-4 md:grid-cols-3">
+                        <div className="rounded-2xl border border-surface-border bg-surface-card p-4"><div className="font-semibold text-text-primary">{guideData.bar_chart?.title || "匹配度"}</div><div className="mt-3 space-y-2">{(guideData.bar_chart?.items || []).map((item: any) => <div key={item.label}><div className="mb-1 flex justify-between gap-3 text-sm"><span className="break-words">{item.label}</span><span>{item.value}</span></div><div className="h-2 rounded-full bg-surface-elevated"><div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(100, Math.max(0, Number(item.value) || 0))}%` }} /></div></div>)}</div></div>
+                        <div className="rounded-2xl border border-surface-border bg-surface-card p-4"><div className="font-semibold text-text-primary">{guideData.pie_chart?.title || "因素权重"}</div><div className="mt-2 space-y-1">{(guideData.pie_chart?.items || []).map((item: any) => <div key={item.label} className="flex justify-between gap-3 text-sm"><span className="break-words">{item.label}</span><span>{item.value}%</span></div>)}</div></div>
+                        <div className="rounded-2xl border border-surface-border bg-surface-card p-4"><div className="font-semibold text-text-primary">{guideData.trend_chart?.title || "趋势"}</div><div className="mt-2 space-y-1">{(guideData.trend_chart?.items || []).map((item: any) => <div key={item.label} className="flex justify-between gap-3 text-sm"><span className="break-words">{item.label}</span><span>{item.value}</span></div>)}</div></div>
+                      </div>
+                      <div className="mt-6 rounded-2xl border border-surface-border bg-surface-card p-5"><div className="font-semibold text-text-primary">下一步</div><ul className="mt-3 list-disc space-y-2 pl-5">{(guideData.next_steps || []).map((step: string) => <li key={step}>{step}</li>)}</ul></div>
                     </div>
                   ) : (
                     <div className="mt-4 max-h-[56vh] overflow-y-auto whitespace-pre-wrap rounded-xl bg-surface-card px-4 py-3 text-sm leading-6 text-text-secondary">{guideResult || "暂无建议"}</div>
@@ -1536,7 +1777,7 @@ export default function GaokaoVolunteerPage() {
         <main className="min-h-0 flex-1 overflow-y-auto bg-surface px-3 py-4 md:px-6 md:py-8">
           <section className="mx-auto flex max-w-6xl flex-col gap-8">
             <div className="rounded-[1.5rem] border border-surface-border bg-surface-card/90 p-5 shadow-sm md:rounded-[2rem] md:p-8">
-              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-neutral-950 dark:text-white"><Sparkles className="h-3.5 w-3.5" /> Gaokao Advisor</div>
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-neutral-950 dark:text-white"><Sparkles className="h-3.5 w-3.5" /> 专属志愿报告</div>
               <h2 className="text-2xl font-semibold tracking-tight text-text-primary md:text-3xl">先选择你的填报入口</h2>
               <p className="mt-3 max-w-3xl text-sm leading-relaxed text-text-secondary">本科、专科、补录和专升本规则不同，先选专项再进入查询工作台。当前先开放本科批次和专科批次；补录和专升本等时间/规则开放后再启用。</p>
             </div>
@@ -1580,7 +1821,7 @@ export default function GaokaoVolunteerPage() {
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">双模型 Advisor</div>多智能体协同分析，生成可解释方案。</div>
+              <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">专属志愿报告</div>多智能体协同分析，生成可解释方案。</div>
               <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">来源可核验</div>展示考试院、招生网、第三方链接，点击即可跳转。</div>
               <div className="rounded-3xl border border-surface-border bg-surface-card/80 p-5 text-sm leading-relaxed text-text-secondary"><div className="mb-1 font-medium text-text-primary">对话可修改</div>进入专项后可用右下角 Agent 继续调整条件。</div>
             </div>
@@ -1630,21 +1871,38 @@ export default function GaokaoVolunteerPage() {
               <label className="flex items-center gap-2"><input type="checkbox" checked={profile.acceptCooperation} onChange={(e) => updateField("acceptCooperation", e.target.checked)} /> 接受中外合作</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={profile.obeyAdjustment} onChange={(e) => updateField("obeyAdjustment", e.target.checked)} /> 倾向服从调剂</label>
             </div>
-            <button onClick={() => runAdvisor(profile, `进入${activeTrack}专项，按当前条件生成完整志愿报告`, activeTrack)} disabled={advisorLoading} className="mt-2 flex w-full items-center justify-center rounded-2xl bg-neutral-950 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:opacity-70 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200">
-              {advisorLoading ? "正在生成报告..." : "生成报告"}
-            </button>
+            <div className="mt-2 grid gap-2">
+              <button type="button" disabled title="官方 API 暂停使用" className="flex w-full cursor-not-allowed items-center justify-center rounded-2xl border border-surface-border bg-surface-elevated px-4 py-3 text-sm font-medium text-text-tertiary opacity-60 shadow-sm">
+                生成报告
+              </button>
+              {activeTrack === "专科" && (
+                <button onClick={() => runAdvisor(profile, `进入${activeTrack}专项，按当前条件生成完整志愿报告`, activeTrack, "committee_clip")} disabled={advisorLoading} className="flex w-full items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-100 disabled:opacity-70 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
+                  {advisorLoading ? "正在生成报告..." : "生成报告（4）"}
+                </button>
+              )}
+            </div>
           </section>
         </aside>
 
         <section className="flex min-h-[460px] flex-col border-b border-surface-border bg-surface px-3 py-4 md:px-4 md:py-5 xl:min-h-0 xl:border-b-0 xl:border-r">
           <div className="mb-4 rounded-3xl border border-surface-border bg-surface-card/90 p-4 shadow-sm">
             <div className="flex items-center gap-2 text-base font-semibold text-text-primary"><Bot className="h-4 w-4 text-neutral-950 dark:text-white" /> 志愿 Agent</div>
-            <p className="mt-1 text-xs leading-relaxed text-text-tertiary">在这里和 Agent 沟通修改方案，右侧文档会按新条件重新生成。</p>
+            <p className="mt-1 text-xs leading-relaxed text-text-tertiary">先和 Agent 聊目标、偏好和顾虑；确认后再生成或重写右侧文档。</p>
           </div>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-3xl border border-surface-border bg-surface-card/70 p-4">
             {messages.map((message, index) => (
               <div key={index} className={cn("whitespace-pre-wrap rounded-2xl px-3 py-2.5 text-sm leading-relaxed", message.role === "user" ? "ml-12 bg-neutral-950 text-white dark:bg-white dark:text-neutral-950" : "mr-12 border border-surface-border bg-surface-elevated text-text-secondary")}>
-                {message.content}
+                {message.role === "assistant" ? (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => <p className="my-1 leading-relaxed">{children}</p>,
+                      strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
+                      ul: ({ children }) => <ul className="my-1 list-disc space-y-1 pl-4">{children}</ul>,
+                      ol: ({ children }) => <ol className="my-1 list-decimal space-y-1 pl-4">{children}</ol>,
+                    }}
+                  >{cleanAdvisorMarkdown(message.content)}</ReactMarkdown>
+                ) : message.content}
               </div>
             ))}
             {advisorLoading && (
@@ -1660,7 +1918,7 @@ export default function GaokaoVolunteerPage() {
               ))}
             </div>
             <div className="flex items-end gap-2">
-              <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="例如：只要省内公办，保底再稳一点..." className="min-h-[52px] flex-1 resize-none rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2.5 text-sm text-text-primary outline-none transition focus:border-neutral-400 dark:border-surface-border focus:ring-2 focus:ring-brand/15" />
+              <textarea value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="先聊偏好；确认后输入：按这个生成报告" className="min-h-[52px] flex-1 resize-none rounded-2xl border border-surface-border bg-surface-elevated px-3 py-2.5 text-sm text-text-primary outline-none transition focus:border-neutral-400 dark:border-surface-border focus:ring-2 focus:ring-brand/15" />
               <button onClick={sendMessage} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-neutral-950 text-white dark:bg-white dark:text-neutral-950 transition hover:bg-neutral-800 dark:hover:bg-neutral-200"><Send className="h-4 w-4" /></button>
             </div>
           </div>
@@ -1710,7 +1968,7 @@ export default function GaokaoVolunteerPage() {
               </div>
             )}
 
-            {reportHistory.length === 0 && !advisorLoading ? (
+            {visibleReportHistory.length === 0 && !advisorLoading ? (
               <div className="flex h-full flex-col items-center justify-center px-6 text-center">
                 <div className="relative mb-4 text-text-tertiary">
                   <Sparkles className="absolute -right-2 -top-1 h-3.5 w-3.5 text-neutral-950 dark:text-white" />
@@ -1721,14 +1979,14 @@ export default function GaokaoVolunteerPage() {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {reportHistory.map((item) => (
+                {visibleReportHistory.map((item) => (
                   <div key={item.id} className="group relative rounded-[18px] transition hover:bg-surface-elevated/70">
                     <button type="button" onClick={() => { setAdvisorResult(item.result); setReportPreviewOpen(true); setOpenReportMenuId(null); }} className="flex w-full items-center gap-3.5 px-2.5 py-3 pr-12 text-left">
                       <span className="flex h-10 w-10 shrink-0 items-center justify-center"><FileText className="h-[25px] w-[25px] text-neutral-950 dark:text-white" /></span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-text-primary">{item.title}</span>
                         <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-text-tertiary">
-                          <span className="truncate">{item.subtitle}</span><span>·</span><span>{item.createdAtLabel}</span>
+                          <span className="truncate">{item.subtitle}</span><span>·</span><span>{formatHistoryTime(item.createdAt, item.createdAtLabel)}</span>
                         </span>
                       </span>
                     </button>
@@ -1761,27 +2019,27 @@ export default function GaokaoVolunteerPage() {
               <button type="button" onClick={() => setReportPreviewOpen(false)} className="mt-1 rounded-full p-2 text-text-tertiary transition hover:bg-surface-hover hover:text-text-primary" title="关闭"><X className="h-5 w-5" /></button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto bg-surface-card p-6">
-              <article className="mx-auto max-w-4xl text-sm leading-7 text-text-secondary">
+              <article className="mx-auto max-w-5xl text-[15px] leading-8 text-text-secondary md:text-base">
                 {advisorResult.final_report_markdown ? (
                   <div ref={reportArticleRef} className="max-w-none text-text-secondary">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        h1: ({ children }) => <h1 className="mb-5 border-b border-surface-border pb-4 text-3xl font-semibold tracking-[-0.03em] text-text-primary">{children}</h1>,
-                        h2: ({ children }) => <h2 className="mb-3 mt-8 text-xl font-semibold tracking-[-0.02em] text-text-primary">{children}</h2>,
-                        h3: ({ children }) => <h3 className="mb-2 mt-5 text-base font-semibold text-text-primary">{children}</h3>,
-                        p: ({ children }) => <p className="my-3 text-sm leading-7 text-text-secondary">{children}</p>,
-                        ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-5 text-sm leading-7 text-text-secondary">{children}</ul>,
-                        ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-5 text-sm leading-7 text-text-secondary">{children}</ol>,
-                        blockquote: ({ children }) => <blockquote className="my-4 border-l-4 border-neutral-300 bg-neutral-50 px-4 py-2 text-sm leading-7 text-text-secondary dark:border-surface-border dark:bg-surface-elevated/50">{children}</blockquote>,
-                        table: ({ children }) => <div className="my-5 overflow-x-auto rounded-2xl border border-surface-border"><table className="min-w-full border-collapse text-left text-xs">{children}</table></div>,
+                        h1: ({ children }) => <h1 className="mb-5 border-b border-surface-border pb-4 text-3xl font-semibold tracking-[-0.03em] text-text-primary md:text-4xl">{children}</h1>,
+                        h2: ({ children }) => <h2 className="mb-3 mt-8 text-2xl font-semibold tracking-[-0.02em] text-text-primary">{children}</h2>,
+                        h3: ({ children }) => <h3 className="mb-2 mt-5 text-lg font-semibold text-text-primary">{children}</h3>,
+                        p: ({ children }) => <p className="my-3 text-[15px] leading-8 text-text-secondary md:text-base">{children}</p>,
+                        ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-5 text-[15px] leading-8 text-text-secondary md:text-base">{children}</ul>,
+                        ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-5 text-[15px] leading-8 text-text-secondary md:text-base">{children}</ol>,
+                        blockquote: ({ children }) => <blockquote className="my-4 border-l-4 border-neutral-300 bg-neutral-50 px-4 py-2 text-[15px] leading-8 text-text-secondary dark:border-surface-border dark:bg-surface-elevated/50 md:text-base">{children}</blockquote>,
+                        table: ({ children }) => <div className="my-5 overflow-x-auto rounded-2xl border border-surface-border"><table className="min-w-full border-collapse text-left text-sm">{children}</table></div>,
                         thead: ({ children }) => <thead className="bg-neutral-100 text-text-primary dark:bg-surface-elevated">{children}</thead>,
-                        th: ({ children }) => <th className="whitespace-nowrap border-b border-surface-border px-3 py-2.5 font-semibold text-text-primary">{children}</th>,
-                        td: ({ children }) => <td className="align-top border-b border-surface-border px-3 py-2.5 text-text-secondary last:border-b-0">{children}</td>,
+                        th: ({ children }) => <th className="whitespace-nowrap border-b border-surface-border px-3.5 py-3 font-semibold text-text-primary">{children}</th>,
+                        td: ({ children }) => <td className="align-top border-b border-surface-border px-3.5 py-3 text-text-secondary last:border-b-0">{children}</td>,
                         strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
                       }}
                     >
-                      {advisorResult.final_report_markdown}
+                      {cleanAdvisorMarkdown(advisorResult.final_report_markdown)}
                     </ReactMarkdown>
                   </div>
                 ) : (

@@ -46,11 +46,42 @@ async function login({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), email = 
   const setCookie = res.headers.get('set-cookie') || '';
   const sessionMatch = setCookie.match(/ai_space_session=([^;,]+)/);
   const refreshMatch = setCookie.match(/ai_space_refresh_token=([^;,]+)/);
-  return { ...data, sessionToken: sessionMatch?.[1] || '', refreshToken: refreshMatch?.[1] || '' };
+  const sessionToken = sessionMatch?.[1] || '';
+  const refreshToken = refreshMatch?.[1] || '';
+  const cookieHeader = [
+    sessionToken ? `ai_space_session=${sessionToken}` : '',
+    refreshToken ? `ai_space_refresh_token=${refreshToken}` : '',
+  ].filter(Boolean).join('; ');
+  return { ...data, sessionToken, refreshToken, cookieHeader };
 }
 
-async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE) } = {}) {
-  const res = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+function authHeaders(auth = {}) {
+  if (typeof auth === 'string') return auth ? { Cookie: auth } : {};
+  if (auth.cookieHeader) return { Cookie: auth.cookieHeader };
+  if (auth.sessionToken || auth.refreshToken) {
+    return { Cookie: [
+      auth.sessionToken ? `ai_space_session=${auth.sessionToken}` : '',
+      auth.refreshToken ? `ai_space_refresh_token=${auth.refreshToken}` : '',
+    ].filter(Boolean).join('; ') };
+  }
+  return {};
+}
+
+async function addAuthCookies(context, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), auth = {} } = {}) {
+  const domain = new URL(baseUrl).hostname;
+  const secure = baseUrl.startsWith('https:');
+  const cookies = [];
+  if (auth.sessionToken) {
+    cookies.push({ name: 'ai_space_session', value: auth.sessionToken, domain, path: '/', httpOnly: true, secure, sameSite: 'Lax' });
+  }
+  if (auth.refreshToken) {
+    cookies.push({ name: 'ai_space_refresh_token', value: auth.refreshToken, domain, path: '/', httpOnly: true, secure, sameSite: 'Lax' });
+  }
+  if (cookies.length) await context.addCookies(cookies);
+}
+
+async function apiGet(path, auth, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE) } = {}) {
+  const res = await fetch(`${baseUrl}${path}`, { headers: authHeaders(auth) });
   const text = await res.text();
   let data;
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
@@ -58,20 +89,20 @@ async function apiGet(path, token, { baseUrl = env('TESTNET_BASE_URL', DEFAULT_B
   return data;
 }
 
-async function deleteConversation({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, conversationId }) {
+async function deleteConversation({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, auth, conversationId }) {
   if (!conversationId || env('KEEP_LIVE_CONVERSATIONS') === '1') return { skipped: true, conversationId };
   const res = await fetch(`${baseUrl}/api/conversations/${conversationId}`, {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(auth || token),
   });
   const text = await res.text().catch(() => '');
   return { conversationId, status: res.status, ok: res.ok, body: text.slice(0, 200) };
 }
 
-async function cleanupConversations({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, conversationIds = [] }) {
+async function cleanupConversations({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, auth, conversationIds = [] }) {
   const results = [];
   for (const conversationId of conversationIds.filter(Boolean)) {
-    results.push(await deleteConversation({ baseUrl, token, conversationId }).catch((error) => ({ conversationId, ok: false, error: error.message })));
+    results.push(await deleteConversation({ baseUrl, token, auth, conversationId }).catch((error) => ({ conversationId, ok: false, error: error.message })));
   }
   return results;
 }
@@ -79,22 +110,14 @@ async function cleanupConversations({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_
 async function openAuthedPage({ baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE), token, user, sessionToken = '', refreshToken = '', viewport = { width: 1440, height: 1000 } }) {
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
   const context = await browser.newContext({ viewport });
-  const cookies = [];
-  if (sessionToken) {
-    cookies.push({ name: 'ai_space_session', value: sessionToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' });
-  }
-  if (refreshToken) {
-    cookies.push({ name: 'ai_space_refresh_token', value: refreshToken, domain: new URL(baseUrl).hostname, path: '/', httpOnly: true, secure: true, sameSite: 'Lax' });
-  }
-  if (cookies.length) {
-    await context.addCookies(cookies);
-  }
+  await addAuthCookies(context, { baseUrl, auth: { sessionToken, refreshToken } });
   const page = await context.newPage();
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
+  await page.addInitScript(({ user }) => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin_token');
     localStorage.setItem('user', JSON.stringify(user));
     if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
-  }, { token, user });
+  }, { user });
   return { browser, page, context, baseUrl };
 }
 
@@ -111,6 +134,8 @@ module.exports = {
   env,
   requireEnv,
   login,
+  authHeaders,
+  addAuthCookies,
   apiGet,
   deleteConversation,
   cleanupConversations,

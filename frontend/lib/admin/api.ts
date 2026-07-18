@@ -16,7 +16,7 @@ import type {
   AdminUser,
   AdminUsersResponse,
 } from "./types";
-import { readAuthState } from "@/lib/auth/state";
+import { ensureAuthSession, refreshBrowserSession } from "@/lib/auth/state";
 
 export class AdminApiError extends Error {
   status: number;
@@ -43,14 +43,11 @@ const ADMIN_TOKEN_KEY = "admin_token";
 const ADMIN_USER_KEY = "admin_user";
 
 export function getStoredAdminToken() {
-  if (typeof window === "undefined") return null;
-  const authState = readAuthState();
-  if (authState.isAdmin && authState.token) return authState.token;
-  return localStorage.getItem(ADMIN_TOKEN_KEY);
+  return null;
 }
 
-export function storeAdminSession(token: string, user: AdminUser) {
-  localStorage.setItem(ADMIN_TOKEN_KEY, token);
+export function storeAdminSession(_token: string | null | undefined, user: AdminUser) {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
   localStorage.setItem(ADMIN_USER_KEY, JSON.stringify(user));
   window.dispatchEvent(new Event("admin-auth-changed"));
 }
@@ -61,23 +58,17 @@ export function clearAdminSession() {
   window.dispatchEvent(new Event("admin-auth-changed"));
 }
 
-let adminRefreshPromise: Promise<string | null> | null = null;
+let adminRefreshPromise: Promise<boolean> | null = null;
 
-async function refreshAdminSession(): Promise<string | null> {
+async function refreshAdminSession(): Promise<boolean> {
   if (!adminRefreshPromise) {
-    adminRefreshPromise = fetch("/api/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-    })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const data = await response.json();
-        if (!data?.token || data.user?.role !== "admin") return null;
-        storeAdminSession(data.token, data.user);
-        return data.token as string;
+    adminRefreshPromise = refreshBrowserSession({ preserveOnMissing: true })
+      .then((session) => {
+        if (session?.user?.role !== "admin") return false;
+        storeAdminSession(null, session.user as AdminUser);
+        return true;
       })
-      .catch(() => null)
+      .catch(() => false)
       .finally(() => {
         adminRefreshPromise = null;
       });
@@ -85,10 +76,9 @@ async function refreshAdminSession(): Promise<string | null> {
   return adminRefreshPromise;
 }
 
-function buildAdminHeaders(token: string | null, headers?: HeadersInit) {
+function buildAdminHeaders(headers?: HeadersInit) {
   return {
     "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...headers,
   };
 }
@@ -97,18 +87,19 @@ export async function adminFetch<T>(path: string, options: RequestInit = {}): Pr
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 12000);
   try {
-    const run = (token: string | null) => fetch(`/api/admin${path}`, {
+    await ensureAuthSession();
+    const run = () => fetch(`/api/admin${path}`, {
       ...options,
       credentials: "include",
       signal: options.signal || controller.signal,
-      headers: buildAdminHeaders(token, options.headers),
+      headers: buildAdminHeaders(options.headers),
     });
 
-    let response = await run(getStoredAdminToken());
+    let response = await run();
     if (response.status === 401) {
-      const refreshedToken = await refreshAdminSession();
-      if (refreshedToken) {
-        response = await run(refreshedToken);
+      const refreshed = await refreshAdminSession();
+      if (refreshed) {
+        response = await run();
       } else {
         clearAdminSession();
       }

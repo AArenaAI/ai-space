@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { DEFAULT_BASE, env, login, apiGet, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, DEFAULT_BASE, env, login, apiGet, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 function parseInjectedPayload(html) {
   const marker = 'id="__AI_SPACE_BOOTSTRAP__" type="application/json">';
@@ -21,7 +21,7 @@ function textNeedleFromPayload(payload) {
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', DEFAULT_BASE).replace(/\/+$/, '');
   const auth = await login({ baseUrl });
-  const initial = await apiGet('/api/chat/bootstrap?message_tail=32&conversation_limit=30', auth.token, { baseUrl });
+  const initial = await apiGet('/api/chat/bootstrap?message_tail=32&conversation_limit=30', auth, { baseUrl });
   const configuredId = Number(env('DYNAMIC_SHELL_CONVERSATION_ID', '0')) || undefined;
   const conversationId = configuredId || initial?.sidebar?.conversations?.find((item) => item?.id)?.id;
   if (!conversationId) throw new Error('No conversation available for dynamic shell live test');

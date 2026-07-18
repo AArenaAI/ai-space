@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 function parseSseDataChunk(raw) {
   return raw.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
@@ -8,7 +8,7 @@ function parseSseDataChunk(raw) {
 async function createConversation(baseUrl, token, model) {
   const res = await fetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({ title: `Active resume live ${Date.now()}`, model }),
   });
   const text = await res.text();
@@ -20,7 +20,7 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
   const prompt = env('ACTIVE_RESUME_PROMPT', '请写一篇较长的中文说明，分 12 段解释 AI Space 聊天生成任务为什么需要支持刷新后恢复。每段不少于 80 字，慢慢写，不要列表化。');
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({
       model,
       conversation_id: conversationId,
@@ -72,12 +72,12 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
   const frontendBaseUrl = env('ACTIVE_INTERRUPT_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const model = env('ACTIVE_RESUME_MODEL', env('REAL_CHAT_MODEL', 'gpt-5.5'));
   const auth = await login({ baseUrl: apiBaseUrl });
-  const conversation = await createConversation(apiBaseUrl, auth.token, model);
+  const conversation = await createConversation(apiBaseUrl, auth, model);
   let cleanup;
-  const interrupted = await startAndInterruptGeneration({ baseUrl: apiBaseUrl, token: auth.token, conversationId: conversation.id, model });
+  const interrupted = await startAndInterruptGeneration({ baseUrl: apiBaseUrl, auth, conversationId: conversation.id, model });
   await new Promise((resolve) => setTimeout(resolve, Number(env('ACTIVE_RESUME_REOPEN_DELAY_MS', '1500'))));
   const bootstrapRes = await fetch(`${apiBaseUrl}/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, {
-    headers: { Authorization: `Bearer ${auth.token}` },
+    headers: { ...authHeaders(auth) },
   });
   const bootstrap = await bootstrapRes.json();
   const activeTasks = bootstrap?.active_tasks?.chat || [];
@@ -87,11 +87,11 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
   if (!matchingTask) {
     const completed = bootstrap?.snapshot?.last_assistant_status?.background_task?.status;
     const result = { ok: true, skipped: true, reason: 'task completed before reload; no active task to resume', apiBaseUrl, frontendBaseUrl, conversationId: conversation.id, interrupted, activeTaskCount: activeTasks.length, lastStatus: completed, snapshotHasAssistant };
-    result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] });
+    result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] });
     printResult(result);
     return;
   }
-  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });
@@ -107,7 +107,7 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
   const streamRequest = events.requests.find((item) => item.url.includes(`/api/tasks/${taskId}/stream`));
   const actualAfter = streamRequest ? Number(new URL(streamRequest.url).searchParams.get('after') || 0) : 0;
   const finalBootstrapRes = await fetch(`${apiBaseUrl}/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, {
-    headers: { Authorization: `Bearer ${auth.token}` },
+    headers: { ...authHeaders(auth) },
   });
   const finalBootstrap = await finalBootstrapRes.json().catch(() => ({}));
   const finalStatus = finalBootstrap?.snapshot?.last_assistant_status;
@@ -118,7 +118,7 @@ async function startAndInterruptGeneration({ baseUrl, token, conversationId, mod
     (Boolean(streamRequest) && actualAfter >= expectedAfter) ||
     (!streamRequest && finalCompleted && finalContentLen > 0 && mainText.trim().length > 0)
   );
-  cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] });
+  cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] });
   result.cleanup = cleanup;
   printResult(result);
   if (!result.ok) process.exit(2);

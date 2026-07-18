@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Menu, X, LogOut, User, Zap, Sparkles, ChevronRight, FlaskConical, KeyRound } from "lucide-react";
+import { MessageSquare, Menu, X, LogOut, User, Zap, Sparkles, ChevronRight, FlaskConical, KeyRound, GraduationCap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import AuthAwareButton, { showLoginModal } from "./AuthAwareButton";
 import { useTheme } from "@/components/theme/ThemeProvider";
@@ -11,10 +11,11 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { useI18n } from "@/lib/i18n";
 
 const navLinks = [
+  { label: "AI 高考志愿", href: "/gaokao-volunteer" },
   { labelKey: "landing.nav.features", href: "#features" },
   { labelKey: "landing.nav.demo", href: "#demo" },
   { labelKey: "landing.nav.about", href: "#stats" },
-  { labelKey: "landing.nav.pricing", href: "/pricing" },
+  { labelKey: "landing.nav.pricing", href: "/pricing", disabled: true },
 ];
 
 export default function LandingHeader() {
@@ -93,9 +94,18 @@ export default function LandingHeader() {
               <a
                 key={link.href}
                 href={link.href}
-                className="text-sm text-text-secondary hover:text-text-primary transition-colors"
+                onClick={(e) => { if ((link as any).disabled) e.preventDefault(); }}
+                className={cn(
+                  "text-sm transition-colors",
+                  (link as any).disabled
+                    ? "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
+                    : link.href === "/gaokao-volunteer"
+                      ? "inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-3 py-1.5 font-semibold text-blue-600 hover:bg-blue-500/15 dark:text-blue-300"
+                      : "text-text-secondary hover:text-text-primary"
+                )}
               >
-                {t(link.labelKey)}
+                {link.href === "/gaokao-volunteer" && <GraduationCap className="h-3.5 w-3.5" />}
+                {(link as any).label || t(link.labelKey!)}
               </a>
             ))}
           </nav>
@@ -223,11 +233,12 @@ export default function LandingHeader() {
                   {t("landing.nav.login")}
                 </button>
                 <AuthAwareButton
+                  href="/gaokao-volunteer"
                   variant="primary"
                   className="!px-4 !py-2 !rounded-xl !shadow-brand/20 !text-sm"
-                  icon={<MessageSquare className="w-4 h-4" />}
+                  icon={<GraduationCap className="w-4 h-4" />}
                 >
-                  {t("landing.nav.startChat")}
+                  AI 高考志愿
                 </AuthAwareButton>
               </>
             )}
@@ -251,10 +262,17 @@ export default function LandingHeader() {
               <a
                 key={link.href}
                 href={link.href}
-                onClick={() => setMobileOpen(false)}
-                className="block text-sm text-text-secondary hover:text-text-primary py-2 transition-colors"
+                onClick={(e) => { if ((link as any).disabled) e.preventDefault(); else setMobileOpen(false); }}
+                className={cn(
+                  "block py-2 text-sm transition-colors",
+                  (link as any).disabled
+                    ? "cursor-not-allowed text-text-tertiary opacity-45 grayscale"
+                    : link.href === "/gaokao-volunteer"
+                      ? "font-semibold text-blue-600 dark:text-blue-300"
+                      : "text-text-secondary hover:text-text-primary"
+                )}
               >
-                {t(link.labelKey)}
+                {(link as any).label || t(link.labelKey!)}
               </a>
             ))}
             <div className="pt-3 border-t border-surface-border space-y-2">

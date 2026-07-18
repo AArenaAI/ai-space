@@ -1,21 +1,21 @@
 #!/usr/bin/env node
-const { env, login, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, printResult } = require('./chat-live-utils.cjs');
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
   const conversationId = Number(env('TESTNET_CONVERSATION_ID') || env('CONVERSATION_ID') || 909);
   const auth = await login({ baseUrl });
   const first = await fetch(`${baseUrl}/api/chat/bootstrap?id=${conversationId}&message_tail=32&conversation_limit=30`, {
-    headers: { Authorization: `Bearer ${auth.token}` },
+    headers: { ...authHeaders(auth) },
   });
   const data = await first.json();
   const version = data?.snapshot?.snapshot_version;
   const second = await fetch(`${baseUrl}/api/chat/bootstrap?id=${conversationId}&message_tail=32&conversation_limit=30`, {
-    headers: { Authorization: `Bearer ${auth.token}`, 'If-None-Match': version || '' },
+    headers: { ...authHeaders(auth), 'If-None-Match': version || '' },
   });
   const secondText = await second.text();
   const quoted = await fetch(`${baseUrl}/api/chat/bootstrap?id=${conversationId}&message_tail=32&conversation_limit=30`, {
-    headers: { Authorization: `Bearer ${auth.token}`, 'If-None-Match': `"${version || ''}"` },
+    headers: { ...authHeaders(auth), 'If-None-Match': `"${version || ''}"` },
   });
   const quotedText = await quoted.text();
   const result = {

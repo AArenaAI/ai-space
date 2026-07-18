@@ -146,6 +146,179 @@ export function useChatCompareSendRuntime({
   getWorkspaceId = () => localStorage.getItem("current-workspace"),
   dispatchWindowEvent = (event) => window.dispatchEvent(event),
 }: UseChatCompareSendRuntimeOptions) {
+  const rerunCompareForEditedUserMessage = useCallback(
+    async ({
+      editedMessage,
+      baseMessages,
+      groupId,
+      groupModels,
+      content,
+    }: {
+      editedMessage: Message;
+      baseMessages: Message[];
+      groupId: number;
+      groupModels: string[];
+      content: string;
+    }) => {
+      const token = getToken();
+      const convId = currentConversation;
+      if (!convId || !editedMessage.serverMessageId) throw new Error("当前对比消息暂不支持编辑");
+      const compareModelIds = selectCompareModelIds(groupModels, models);
+      if (!shouldStartCompare(compareModelIds)) throw new Error("当前对比组缺少模型信息，无法重新生成");
+      lastReasoningRef.current = lastReasoningRef.current || { enabled: false };
+      const assistantMsgs = createCompareAssistantMessages({
+        modelIds: compareModelIds,
+        ids: compareModelIds.map(() => createId()),
+        createdAt: now(),
+        search: lastSearchRef.current,
+      }).map((message, index) => ({
+        ...message,
+        groupId,
+        groupIndex: index,
+        groupModels: compareModelIds,
+        userMessageId: editedMessage.serverMessageId,
+        activityStatus: createBusyGeneratingStatus(translate),
+        generationStartedAt: now(),
+      })) as Message[];
+      const nextMessages = [...baseMessages, ...assistantMsgs];
+      setIsCompare(true);
+      setCompareModels(compareModelIds);
+      setMessages(nextMessages);
+      syncCompareMessagesToRuntime(convId, nextMessages, compareModelIds);
+      setIsLoading(true);
+      dispatchWindowEvent(new CustomEvent("conversation-updated", {
+        detail: buildConversationUpdatedEventDetail(convId, new Date(now()).toISOString(), {
+          title: content.slice(0, 20) + (content.length > 20 ? "..." : ""),
+          model: compareModelIds[0],
+          source: "local-edit-compare-user-message",
+        }),
+      }));
+
+      const controllers = assistantMsgs.map(() => new AbortController());
+      compareAbortControllersRef.current = controllers;
+      abortControllerRef.current = null;
+      abortReasonRef.current = null;
+      const headers = buildChatRequestHeaders({ token, guestId: getGuestId() });
+      const groupContext = { groupId, userMessageId: editedMessage.serverMessageId, groupModels: compareModelIds };
+      const handleCompareGroupContextResolved = (context: ChatStreamGroupContext) => {
+        setMessages((prev) => {
+          const next = applyCompareGroupContextToMessages(prev, {
+            userMessageId: editedMessage.id,
+            assistantIds: assistantMsgs.map((assistant) => assistant.id),
+            context,
+          });
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
+        });
+      };
+      const handleCompareRecoverableResult = (assistantMsg: Message, streamResult: ChatStreamRunResult) => {
+        const serverBoundAssistant = {
+          ...assistantMsg,
+          serverMessageId: streamResult.serverMessageId || assistantMsg.serverMessageId,
+          generationTaskId: streamResult.generationTaskId || assistantMsg.generationTaskId,
+          activityStatus: createBusyGeneratingStatus(translate),
+          serverGenerationStatus: assistantMsg.serverGenerationStatus || "running",
+        } as Message;
+        initializeAssistantRealtimeBatch([serverBoundAssistant], serverBoundAssistant.createdAt || editedMessage.createdAt || now());
+        setMessages((prev) => {
+          const existingIndex = prev.findIndex((message) =>
+            message.id === serverBoundAssistant.id ||
+            (serverBoundAssistant.serverMessageId && message.serverMessageId === serverBoundAssistant.serverMessageId) ||
+            (serverBoundAssistant.generationTaskId && message.generationTaskId === serverBoundAssistant.generationTaskId)
+          );
+          const next = existingIndex === -1
+            ? [...prev, serverBoundAssistant]
+            : patchMessageById(prev, prev[existingIndex].id, (m) => ({
+              ...m,
+              ...serverBoundAssistant,
+              ...buildRecoverableResultPatch({
+                serverMessageId: streamResult.serverMessageId,
+                generationTaskId: streamResult.generationTaskId,
+                existingServerMessageId: m.serverMessageId,
+                existingGenerationTaskId: m.generationTaskId,
+                busyActivityStatus: createBusyGeneratingStatus(translate),
+              }),
+            }));
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
+        });
+      };
+      const handleCompareRunError = (assistantMsg: Message, error: any, streamResult?: ChatStreamRunResult) => {
+        const realtime = realtimeGet(assistantMsg.id);
+        const decision = decideCompareRunError({
+          assistantModel: assistantMsg.model || "",
+          error,
+          streamResult,
+          realtime,
+          hasTaskStream: !!taskStreamsRef.current[assistantMsg.id],
+          hasBackgroundPoller: !!backgroundPollersRef.current[assistantMsg.id],
+          conversationId: convId,
+          existingServerMessageId: assistantMsg.serverMessageId,
+          existingGenerationTaskId: assistantMsg.generationTaskId,
+          busyActivityStatus: createBusyGeneratingStatus(translate),
+          now: now(),
+        });
+        setMessages((prev) => {
+          const next = patchMessageById(prev, assistantMsg.id, decision.patch);
+          syncCompareMessagesToRuntime(convId, next, compareModelIds);
+          return next;
+        });
+        if (decision.type === "recoverable_busy" && decision.shouldStartBackgroundPolling && decision.serverMessageId) {
+          startBackgroundPolling(convId, assistantMsg.id, decision.serverMessageId);
+        }
+      };
+      try {
+        await runCompareModels({
+          apiBaseUrl,
+          headers,
+          controllers,
+          assistantMessages: assistantMsgs,
+          compareModelIds,
+          modelMessages: toModelMessages(baseMessages),
+          conversationId: convId,
+          notebookId,
+          notebookFileIds,
+          reasoning: lastReasoningRef.current,
+          search: lastSearchRef.current,
+          templateId: 0,
+          skillKey: effectiveSkillKey,
+          explicitGroupContext: groupContext,
+          callbacks: {
+            streamResponse,
+            onGroupContextResolved: handleCompareGroupContextResolved,
+            onRecoverableResult: handleCompareRecoverableResult,
+            onAbortUser: (assistantMsg) => {
+              setMessages((prev) => {
+                const next = patchMessageById(prev, assistantMsg.id, buildUserAbortStoppedPatch(now()));
+                syncCompareMessagesToRuntime(convId, next, compareModelIds);
+                return next;
+              });
+            },
+            onRunError: handleCompareRunError,
+            getAbortReason: () => abortReasonRef.current,
+          },
+        });
+      } finally {
+        const decision = decideCompareRunFinally({
+          abortReason: abortReasonRef.current,
+          hasActiveTaskStream: Object.keys(taskStreamsRef.current).length > 0,
+          hasActivePoller: Object.keys(backgroundPollersRef.current).length > 0,
+          conversationId: convId,
+        });
+        if (decision.shouldUpdateLoading) setIsLoading(Boolean(decision.isLoading));
+        if (decision.shouldClearCompareControllers) compareAbortControllersRef.current = [];
+        if (decision.shouldClearMainController) abortControllerRef.current = null;
+        if (decision.shouldClearAbortReason) abortReasonRef.current = null;
+        if (decision.shouldDispatchConversationUpdated && decision.conversationId && !notebookId) {
+          dispatchWindowEvent(new CustomEvent("conversation-updated", {
+            detail: buildConversationUpdatedEventDetail(decision.conversationId, new Date(now()).toISOString()),
+          }));
+        }
+      }
+    },
+    [apiBaseUrl, models, currentConversation, streamResponse, effectiveSkillKey, createId, now, getToken, setIsCompare, setCompareModels, setMessages, setIsLoading, startBackgroundPolling, dispatchWindowEvent, translate]
+  );
+
   const retryCompareColumn = useCallback(
     async (assistant: Message, userMessage: Message) => {
       if (!assistant.groupId || !userMessage.serverMessageId || typeof assistant.groupIndex !== "number" || !assistant.model) {
@@ -308,7 +481,7 @@ export function useChatCompareSendRuntime({
       const token = getToken();
 
       let convId = currentConversation;
-      if (token && !convId) {
+      if (!convId) {
         const title = content.trim().slice(0, 20) + (content.trim().length > 20 ? "..." : "");
         convId = await createConversation(title, compareModelIds[0], effectiveSkillKey);
       }
@@ -527,5 +700,5 @@ export function useChatCompareSendRuntime({
     ]
   );
 
-  return { sendCompareMessages, retryCompareColumn };
+  return { sendCompareMessages, retryCompareColumn, rerunCompareForEditedUserMessage };
 }

@@ -7,6 +7,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError } from "@/lib/errors";
+import { applyAuthSession } from "@/lib/auth/state";
 
 export default function LoginForm() {
   const { t } = useI18n();
@@ -36,11 +37,8 @@ export default function LoginForm() {
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      if (data.user?.default_workspace_id) localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
+      applyAuthSession({ user: data.user });
       import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
-      window.dispatchEvent(new Event("auth-changed"));
       router.push(decodeURIComponent(safeReturnUrl));
     } catch (err) {
       const message = getErrorMessage(err, { module: "auth", fallbackTitle: t("auth.error.loginFailed"), fallbackMessage: t("auth.error.loginFailed") });

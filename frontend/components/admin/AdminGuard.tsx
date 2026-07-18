@@ -33,11 +33,11 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
 
     const verifyAdmin = async () => {
       setState({ status: "loading" });
-      if (!auth.token || !auth.user || auth.user.role !== "admin") {
+      if (!auth.user || auth.user.role !== "admin") {
         redirectToLogin();
         return;
       }
-      storeAdminSession(auth.token, auth.user as AdminUser);
+      storeAdminSession(null, auth.user as AdminUser);
       try {
         const { user } = await getAdminMe();
         if (cancelled) return;
@@ -57,7 +57,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [auth.status, auth.token, auth.user, pathname, router]);
+  }, [auth.status, auth.user, pathname, router]);
 
   if (state.status === "loading") {
     return (

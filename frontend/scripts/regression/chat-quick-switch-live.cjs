@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-const { env, login, apiGet, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, apiGet, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
   const apiBaseUrl = env('QUICK_SWITCH_API_BASE_URL', baseUrl).replace(/\/+$/, '');
   const frontendBaseUrl = env('QUICK_SWITCH_FRONTEND_BASE_URL', baseUrl).replace(/\/+$/, '');
   const auth = await login({ baseUrl: apiBaseUrl });
-  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });
@@ -19,7 +19,7 @@ const { env, login, apiGet, openAuthedPage, summarizeConsole, printResult } = re
   const visibleIds = await page.evaluate(() => Array.from(document.querySelectorAll('[data-conversation-id]')).map((el) => Number(el.getAttribute('data-conversation-id'))).filter(Boolean));
   const picked = [];
   for (const id of Array.from(new Set(visibleIds))) {
-    const data = await apiGet(`/api/conversations/${id}/messages?limit=10`, auth.token, { baseUrl: apiBaseUrl }).catch(() => ({ messages: [] }));
+    const data = await apiGet(`/api/conversations/${id}/messages?limit=10`, auth, { baseUrl: apiBaseUrl }).catch(() => ({ messages: [] }));
     const msg = (data.messages || []).find((item) => (item.content || '').trim().length > 8);
     if (msg) picked.push({ id, needle: msg.content.trim().slice(0, 18) });
     if (picked.length >= 3) break;

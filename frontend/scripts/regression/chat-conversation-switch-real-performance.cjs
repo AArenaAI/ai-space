@@ -49,14 +49,17 @@ async function registerUser() {
   });
   assert.equal(res.status, 201, `register failed: ${res.status} ${redact(text.slice(0, 500))}`);
   const data = JSON.parse(text);
-  assert.ok(data.token, "register response missing token");
-  return { token: data.token, user: data.user || {}, email };
+  const setCookie = res.headers.get("set-cookie") || "";
+  const sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || "";
+  const refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || "";
+  const cookieHeader = [sessionToken ? `ai_space_session=${sessionToken}` : "", refreshToken ? `ai_space_refresh_token=${refreshToken}` : ""].filter(Boolean).join("; ");
+  return { sessionToken, refreshToken, cookieHeader, user: data.user || {}, email };
 }
 
-async function createConversation(token, title) {
+async function createConversation(auth, title) {
   const { res, text } = await fetchText(`${apiBaseUrl}/api/conversations`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", Cookie: auth.cookieHeader || "" },
     body: JSON.stringify({ title, model }),
   });
   assert.equal(res.status, 201, `conversation create failed: ${res.status} ${redact(text.slice(0, 500))}`);
@@ -65,20 +68,20 @@ async function createConversation(token, title) {
   return data;
 }
 
-async function addMessage(token, conversationId, role, content) {
+async function addMessage(auth, conversationId, role, content) {
   const { res, text } = await fetchText(`${apiBaseUrl}/api/conversations/${conversationId}/messages`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    headers: { "Content-Type": "application/json", Cookie: auth.cookieHeader || "" },
     body: JSON.stringify({ role, content, model: role === "assistant" ? model : "" }),
   });
   assert.equal(res.status, 201, `message create failed: ${res.status} ${redact(text.slice(0, 500))}`);
   return JSON.parse(text);
 }
 
-async function seedConversation(token, title, marker) {
-  const conversation = await createConversation(token, title);
-  await addMessage(token, conversation.id, "user", `${marker} 用户问题`);
-  await addMessage(token, conversation.id, "assistant", `${marker} 助手回答 OK 42`);
+async function seedConversation(auth, title, marker) {
+  const conversation = await createConversation(auth, title);
+  await addMessage(auth, conversation.id, "user", `${marker} 用户问题`);
+  await addMessage(auth, conversation.id, "assistant", `${marker} 助手回答 OK 42`);
   return conversation;
 }
 
@@ -327,13 +330,19 @@ async function main() {
 
   const auth = await registerUser();
   const suffix = `${Date.now()}`;
-  const convA = await seedConversation(auth.token, `Switch Perf A ${suffix}`, `SWITCH_PERF_A_${suffix}`);
-  const convB = await seedConversation(auth.token, `Switch Perf B ${suffix}`, `SWITCH_PERF_B_${suffix}`);
+  const convA = await seedConversation(auth, `Switch Perf A ${suffix}`, `SWITCH_PERF_A_${suffix}`);
+  const convB = await seedConversation(auth, `Switch Perf B ${suffix}`, `SWITCH_PERF_B_${suffix}`);
 
   const proxy = await startProxy();
   const proxyBase = `http://127.0.0.1:${proxyPort}`;
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const cookieDomain = new URL(proxyBase).hostname;
+  const authCookies = [];
+  if (auth.sessionToken) authCookies.push({ name: "ai_space_session", value: auth.sessionToken, domain: cookieDomain, path: "/", httpOnly: true, secure: proxyBase.startsWith("https:"), sameSite: "Lax" });
+  if (auth.refreshToken) authCookies.push({ name: "ai_space_refresh_token", value: auth.refreshToken, domain: cookieDomain, path: "/", httpOnly: true, secure: proxyBase.startsWith("https:"), sameSite: "Lax" });
+  if (authCookies.length) await context.addCookies(authCookies);
+  const page = await context.newPage();
   const issues = [];
   const switchTimings = [];
 
@@ -358,8 +367,9 @@ async function main() {
   });
 
   try {
-    await page.addInitScript(({ tokenValue, userValue, modelValue }) => {
-      localStorage.setItem("token", tokenValue);
+    await page.addInitScript(({ userValue, modelValue }) => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("admin_token");
       localStorage.setItem("user", JSON.stringify(userValue || {}));
       localStorage.setItem("selected-model", modelValue);
       localStorage.setItem("recent-models", JSON.stringify([modelValue]));
@@ -373,7 +383,7 @@ async function main() {
       window.addEventListener("chat-render-profile", (event) => {
         window.__chatRenderProfileEvents.push(event.detail);
       });
-    }, { tokenValue: auth.token, userValue: auth.user, modelValue: model });
+    }, { userValue: auth.user, modelValue: model });
 
     const response = await page.goto(`${proxyBase}/chat/?id=${convA.id}`, { waitUntil: "domcontentloaded", timeout: 30000 });
     assert.ok((response?.status() || 0) < 400, `chat page HTTP ${response?.status()}`);

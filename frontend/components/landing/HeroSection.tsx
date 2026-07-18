@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { GraduationCap, Sparkles } from "lucide-react";
 import AuthAwareButton from "./AuthAwareButton";
 import ChatDemo from "./ChatDemo";
 import { useI18n } from "@/lib/i18n";
 
 export default function HeroSection() {
   const { t } = useI18n();
-  const tags = ["GPT 5.5", "GPT 5.4", "Gemini 3.1", "GPT Image 2", t("landing.hero.tag.deepThinking"), t("landing.hero.tag.webSearch")];
+  const tags = ["AI 高考志愿", "GPT 5.5", "GPT 5.4", "Gemini 3.1", "GPT Image 2", t("landing.hero.tag.deepThinking"), t("landing.hero.tag.webSearch")];
 
   return (
     <section className="relative min-h-screen flex items-center pt-16 overflow-hidden">
@@ -39,13 +39,13 @@ export default function HeroSection() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start animate-fade-up" style={{ animationDelay: "300ms" }}>
-              <AuthAwareButton variant="primary" icon={<ArrowRight className="w-4 h-4" />}>
-                {t("landing.hero.cta")}
+              <AuthAwareButton href="/gaokao-volunteer" variant="primary" icon={<GraduationCap className="w-4 h-4" />}>
+                AI 高考志愿
               </AuthAwareButton>
-              <a href="#features" className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-surface-card border border-surface-border text-text-primary text-sm font-medium hover:bg-surface-elevated transition-all duration-200 hover:-translate-y-0.5">
+              <a href="#features" className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-surface-border bg-surface-card px-6 py-3 text-sm font-medium text-text-tertiary opacity-45 grayscale">
                 {t("landing.hero.learnFeatures")}
               </a>
-              <Link href="/pricing" className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-sm font-medium hover:bg-amber-500/20 transition-all duration-200 hover:-translate-y-0.5">
+              <Link href="/pricing" onClick={(e) => e.preventDefault()} className="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 px-6 py-3 text-sm font-medium text-amber-600 opacity-45 grayscale dark:text-amber-400">
                 {t("landing.hero.viewPricing")}
               </Link>
             </div>

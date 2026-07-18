@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const baseUrl = trimTrailingSlash(env('REAL_CHAT_BASE_URL', env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz')));
 const apiBaseUrl = trimTrailingSlash(env('REAL_CHAT_API_BASE_URL', baseUrl));
@@ -38,7 +38,7 @@ function logStep(message) {
 async function apiJson(path, token, init = {}) {
   const res = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -94,7 +94,7 @@ async function main() {
 
     auth = await login({ baseUrl: apiBaseUrl });
     report.userId = auth.user?.id;
-    conversation = await apiJson('/api/conversations', auth.token, {
+    conversation = await apiJson('/api/conversations', auth, {
       method: 'POST',
       body: JSON.stringify({ title: `real live send ${startedAt}`, model }),
     });
@@ -103,7 +103,7 @@ async function main() {
 
     const opened = await openAuthedPage({
       baseUrl: frontendBaseUrl,
-      token: auth.token,
+      auth,
       user: auth.user,
       sessionToken: auth.sessionToken,
       refreshToken: auth.refreshToken,
@@ -195,7 +195,7 @@ async function main() {
       };
     }, expectPattern.source);
 
-    const boot = await apiJson(`/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, auth.token);
+    const boot = await apiJson(`/api/chat/bootstrap?id=${conversation.id}&message_tail=32&conversation_limit=30`, auth);
     const latest = [...(boot.snapshot?.messages || [])].reverse().find((message) => message.role === 'assistant') || null;
     const answerMatches = (sample.assistantTexts || []).filter((text) => expectPattern.test(text)).length;
     const ok = answerMatches === 1
@@ -231,7 +231,7 @@ async function main() {
   } finally {
     await browser?.close().catch(() => {});
     if (conversation?.id && auth?.token) {
-      cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] });
+      cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] });
       report.cleanup = cleanup;
     }
   }

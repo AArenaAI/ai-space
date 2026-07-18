@@ -137,7 +137,7 @@ export function useChatSingleSendRuntime({
       const token = getToken();
 
       let convId = currentConversation;
-      if (token && !convId && !isRegenerate) {
+      if (!convId && !isRegenerate) {
         const title = buildNewConversationTitle(content);
         convId = await createConversation(title, selectedModel.id, effectiveSkillKey);
         if (!convId) {
@@ -201,6 +201,19 @@ export function useChatSingleSendRuntime({
       const controller = new AbortController();
       abortReasonRef.current = null;
       abortControllerRef.current = controller;
+      // local_committed → submitting：在真正发起 init 前切换发送状态
+      if (messagePlan.userMessage && messagePlan.userMessage.sendStatus === "local_committed") {
+        setMessages((prev) => {
+          const next = prev.map((message) =>
+            sameChatMessage(message, messagePlan.userMessage!)
+              ? { ...message, sendStatus: "submitting" as const }
+              : message
+          );
+          lastRuntimeMessages = next;
+          syncSingleSendMessagesToRuntime(convId, next);
+          return next;
+        });
+      }
       let activeAssistantId = localAssistantMsg.id;
       let hasInsertedServerAssistant = false;
       if (pendingLocalAssistantsRef && convId) {
@@ -227,6 +240,9 @@ export function useChatSingleSendRuntime({
           skillKey: effectiveSkillKey,
           messageFileIds: file_ids,
           fallbackId: () => localAssistantMsg.id,
+          clientMessageId: messagePlan.userMessage?.clientMessageId,
+          localRunId: messagePlan.userMessage?.localRunId,
+          sendStatus: messagePlan.userMessage?.sendStatus,
         });
         convId = initResult.conversation_id || convId;
         const serverAssistant = bindServerMessage(localAssistantMsg, {
@@ -301,14 +317,16 @@ export function useChatSingleSendRuntime({
                   } as Message
                 : message)
               : prev;
+            const stopped = decision.type === "stopped";
             const next = withUserState.some((message) => message?.id === activeAssistantId)
               ? patchMessageById(withUserState, activeAssistantId, {
                   ...decision.patch,
-                  generationStatus: decision.type === "stopped" ? "cancelled" : "failed",
+                  stopped,
+                  generationStatus: stopped ? "cancelled" : "failed",
                 })
               : hasInsertedServerAssistant
                 ? withUserState
-                : [...withUserState, { ...localAssistantMsg, ...decision.patch, generationStatus: decision.type === "stopped" ? "cancelled" : "failed" } as Message];
+                : [...withUserState, { ...localAssistantMsg, ...decision.patch, stopped, generationStatus: stopped ? "cancelled" : "failed" } as Message];
             syncSingleSendMessagesToRuntime(convId, next, buildPendingLocalAssistantMessages(pendingLocalAssistantsRef, convId));
             return next;
           });

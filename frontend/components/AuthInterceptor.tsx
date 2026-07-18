@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { getGuestId } from "@/lib/guestId";
 import { normalizeError } from "@/lib/errors";
-import { clearBrowserAuthState, ensureAuthSession, readAuthState, refreshBrowserSession, storeAdminAuthSnapshot } from "@/lib/auth/state";
+import { clearBrowserAuthState, ensureAuthSession, refreshBrowserSession } from "@/lib/auth/state";
 import { toast } from "sonner";
 
 const AUTH_REFRESH_PATH = "/api/auth/refresh";
@@ -88,9 +88,9 @@ export default function AuthInterceptor() {
       setTimeout(() => { redirecting = false; }, 3000);
     };
 
-    const retryWithToken = (input: RequestInfo | URL, init: RequestInit | undefined, token: string) => {
+    const retryWithSession = (input: RequestInfo | URL, init: RequestInit | undefined) => {
       const retryHeaders = new Headers(input instanceof Request ? input.headers : init?.headers);
-      retryHeaders.set("Authorization", `Bearer ${token}`);
+      retryHeaders.delete("Authorization");
       const retryInit: RequestInit = {
         ...(init || {}),
         headers: retryHeaders,
@@ -118,14 +118,7 @@ export default function AuthInterceptor() {
 
       let nextInit: RequestInit | undefined = init ? { ...init } : undefined;
       const headers = new Headers(input instanceof Request ? input.headers : init?.headers);
-      const hasAuth = headers.has("Authorization");
-      if (!hasAuth && !isAuthLifecycle) {
-        const authState = readAuthState();
-        const token = isAdminApi ? (authState.isAdmin ? authState.token : localStorage.getItem("admin_token")) : authState.token;
-        if (token && token !== "null" && token !== "undefined") {
-          headers.set("Authorization", `Bearer ${token}`);
-        }
-      }
+      if (!isAuthLifecycle) headers.delete("Authorization");
       if (!isAdminApi) {
         const guestId = getGuestId();
         if (guestId) headers.set("X-Guest-ID", guestId);
@@ -136,16 +129,15 @@ export default function AuthInterceptor() {
 
       if (res.status === 401 && shouldAttemptRefresh) {
         const session = await refreshBrowserSession({ preserveOnMissing: true }).catch(() => null);
-        if (session?.token) {
+        if (session?.user) {
           if (isAdminApi) {
             if (session.user?.role === "admin") {
-              storeAdminAuthSnapshot(session.token, session.user);
-              res = await originalFetch(requestForRetry, retryWithToken(input, init, session.token));
+              res = await originalFetch(requestForRetry, retryWithSession(input, init));
             } else {
               redirectToAdminLogin();
             }
           } else {
-            res = await originalFetch(requestForRetry, retryWithToken(input, init, session.token));
+            res = await originalFetch(requestForRetry, retryWithSession(input, init));
           }
         } else if (isAdminApi) {
           redirectToAdminLogin();

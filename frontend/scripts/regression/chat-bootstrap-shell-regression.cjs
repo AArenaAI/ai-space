@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
+const { addAuthCookies } = require("./chat-live-utils.cjs");
 
 const baseUrl = process.env.CHAT_BOOTSTRAP_SHELL_BASE_URL || "https://testnet.ai-space.xyz";
 const email = process.env.TESTNET_EMAIL || "changsheng010909@gmail.com";
@@ -19,11 +20,17 @@ async function login() {
   });
   const text = await response.text();
   assert.equal(response.ok, true, `login failed ${response.status}: ${text.slice(0, 200)}`);
-  return JSON.parse(text);
+  const data = JSON.parse(text);
+  const setCookie = response.headers.get('set-cookie') || '';
+  data.sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || '';
+  data.refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || '';
+  return data;
 }
 
 async function openConversation(browser, auth, id) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await addAuthCookies(context, { baseUrl, auth });
+  const page = await context.newPage();
   const errors = [];
   const responses = [];
   page.on("console", (msg) => { if (msg.type() === "error") errors.push(msg.text()); });
@@ -38,10 +45,11 @@ async function openConversation(browser, auth, id) {
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.evaluate(({ token, user }) => {
     localStorage.clear();
-    localStorage.setItem("token", token);
+    localStorage.removeItem("token");
+    localStorage.removeItem("admin_token");
     localStorage.setItem("user", JSON.stringify(user));
     if (user?.default_workspace_id) localStorage.setItem("current-workspace", String(user.default_workspace_id));
-  }, { token: auth.token, user: auth.user });
+  }, { user: auth.user });
 
   await page.goto(`${baseUrl}/chat/?id=${id}`, { waitUntil: "domcontentloaded" });
   const early = await page.evaluate(() => ({
@@ -74,7 +82,9 @@ async function openConversation(browser, auth, id) {
 }
 
 async function openConversationWithBootstrapFailure(browser, auth, id) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await addAuthCookies(context, { baseUrl, auth });
+  const page = await context.newPage();
   const errors = [];
   page.on("console", (msg) => { if (msg.type() === "error") errors.push(msg.text()); });
   page.on("pageerror", (error) => errors.push(error.message));
@@ -87,10 +97,11 @@ async function openConversationWithBootstrapFailure(browser, auth, id) {
   await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
   await page.evaluate(({ token, user }) => {
     localStorage.clear();
-    localStorage.setItem("token", token);
+    localStorage.removeItem("token");
+    localStorage.removeItem("admin_token");
     localStorage.setItem("user", JSON.stringify(user));
     if (user?.default_workspace_id) localStorage.setItem("current-workspace", String(user.default_workspace_id));
-  }, { token: auth.token, user: auth.user });
+  }, { user: auth.user });
 
   await page.goto(`${baseUrl}/chat/?id=${id}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="chat-history-scroll-container"], [data-testid="chat-message-list"]', { timeout: 30_000 });

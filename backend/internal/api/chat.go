@@ -182,6 +182,9 @@ type ChatRequest struct {
 	GroupIndex      *int               `json:"group_index,omitempty"`        // 当前模型在组内的顺序
 	GroupModels     []string           `json:"group_models,omitempty"`       // 本轮不可变模型快照
 	UserMessageID   uint               `json:"user_message_id,omitempty"`    // skip_save_user_msg 时复用的用户消息
+	ClientMessageID string             `json:"client_message_id,omitempty"`  // 前端本地消息身份（React key）
+	LocalRunID      string             `json:"local_run_id,omitempty"`       // 一次发送/停止/重试行为身份
+	SendStatus      string             `json:"send_status,omitempty"`        // 前端发送状态（向后兼容）
 	WorkspaceID     uint               `json:"workspace_id,omitempty"`
 	NotebookID      uint               `json:"notebook_id,omitempty"`       // 指定笔记本资料空间
 	NotebookFileIDs []uint             `json:"notebook_file_ids,omitempty"` // 指定本轮参与回答的笔记本资料源
@@ -1061,11 +1064,14 @@ func (h *ChatHandler) chatWithRequest(c *gin.Context, req *ChatRequest) {
 		}
 		if userMsg != nil {
 			msg := models.Message{
-				ConversationID: conversationID,
-				Role:           "user",
-				Content:        userMsg.Content,
-				Model:          req.Model,
-				CreatedAt:      time.Now(),
+				ConversationID:  conversationID,
+				Role:            "user",
+				Content:         userMsg.Content,
+				Model:           req.Model,
+				CreatedAt:       time.Now(),
+				ClientMessageID: req.ClientMessageID,
+				LocalRunID:      req.LocalRunID,
+				SendStatus:      "server_bound",
 			}
 			h.db.Create(&msg)
 			savedUserMessageID = msg.ID
@@ -1101,6 +1107,7 @@ func (h *ChatHandler) chatWithRequest(c *gin.Context, req *ChatRequest) {
 			LastSequenceNumber: 0,
 			Phase:              "queued",
 			CreatedAt:          time.Now(),
+			LocalRunID:         req.LocalRunID,
 		}
 		if err := h.db.Create(&assistantMsg).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存 assistant 占位消息失败"})
@@ -1223,6 +1230,7 @@ func (h *ChatHandler) chatWithRequest(c *gin.Context, req *ChatRequest) {
 				LastSequenceNumber: 1,
 				Phase:              "queued",
 				CreatedAt:          time.Now(),
+				LocalRunID:         req.LocalRunID,
 			},
 			GroupID:                groupCtx.Group.ID,
 			GroupIndex:             groupCtx.GroupIndex,
@@ -1695,22 +1703,34 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 			}
 		}
 		finalStatus := "completed"
+		cancelledByUser := forwardErr != nil && strings.Contains(strings.ToLower(forwardErr.Error()), "generation cancelled")
 		if forwardErr != nil {
 			finalStatus = "failed"
-			if content == "" {
+			if cancelledByUser {
+				finalStatus = "cancelled"
+				content = ""
+			} else if content == "" {
 				content = fmt.Sprintf("生成失败: %v", forwardErr)
 			}
 			seq := streamResult.LastSequenceNumber + 1
 			if seq <= req.InitialSequence {
 				seq = req.InitialSequence + 1
 			}
-			out, _ := json.Marshal(map[string]interface{}{
-				"choices": []map[string]interface{}{
-					{"delta": map[string]string{"content": ""}},
-				},
-				"_error_meta": map[string]interface{}{"user_message": forwardErr.Error(), "code": "stream_failed"},
-			})
-			h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
+			if cancelledByUser {
+				out, _ := json.Marshal(map[string]interface{}{
+					"choices":     []map[string]interface{}{{"delta": map[string]string{}}},
+					"_error_meta": map[string]interface{}{"user_message": "生成已停止", "code": "cancelled", "stopped": true},
+				})
+				h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "cancelled", string(out))
+			} else {
+				out, _ := json.Marshal(map[string]interface{}{
+					"choices": []map[string]interface{}{
+						{"delta": map[string]string{"content": ""}},
+					},
+					"_error_meta": map[string]interface{}{"user_message": forwardErr.Error(), "code": "stream_failed"},
+				})
+				h.persistTaskEvent(req.Task, req.AssistantMessageID, seq, "error", string(out))
+			}
 			streamResult.LastSequenceNumber = seq
 		} else if streamResult.ErrorMessage != "" {
 			finalStatus = "incomplete"
@@ -1720,12 +1740,19 @@ func (h *ChatHandler) runGenerationTask(req GenerationTaskRunRequest) {
 		} else if strings.TrimSpace(content) == "" {
 			content = "任务已完成，但未返回可展示文本。"
 		}
+		phase := finalStatus
+		if cancelledByUser {
+			phase = "stopped"
+		}
 		updates := map[string]interface{}{
 			"content":              content,
 			"completed_at":         time.Now(),
 			"generation_status":    finalStatus,
 			"last_sequence_number": streamResult.LastSequenceNumber,
-			"phase":                finalStatus,
+			"phase":                phase,
+		}
+		if cancelledByUser {
+			updates["stopped"] = true
 		}
 		if strings.TrimSpace(streamResult.ReasoningContent) != "" {
 			updates["reasoning_content"] = streamResult.ReasoningContent
@@ -2886,9 +2913,11 @@ func (h *ChatHandler) CancelGenerationTask(c *gin.Context) {
 	if seq <= 1 {
 		seq = 2
 	}
+	// 用户主动 Stop 只应持久化 stopped 状态，不应把停止提示写成 assistant 正文。
+	// 前端用 Message.Stopped 渲染 Gemini 式横线；若这里发送 delta content，刷新后会被当成有正文的 assistant row。
 	out, _ := json.Marshal(map[string]interface{}{
-		"choices":     []map[string]interface{}{{"delta": map[string]string{"content": message}}},
-		"_error_meta": map[string]interface{}{"user_message": message, "code": "cancelled"},
+		"choices":     []map[string]interface{}{{"delta": map[string]string{}}},
+		"_error_meta": map[string]interface{}{"user_message": message, "code": "cancelled", "stopped": true},
 	})
 	h.persistTaskEvent(&task, task.AssistantMessageID, seq, "cancelled", string(out))
 	h.persistTaskEvent(&task, task.AssistantMessageID, seq+1, "done", "[DONE]")
@@ -2896,7 +2925,8 @@ func (h *ChatHandler) CancelGenerationTask(c *gin.Context) {
 	h.db.Model(&models.Message{}).Where("id = ?", task.AssistantMessageID).Updates(map[string]interface{}{
 		"completed_at":      &now,
 		"generation_status": "cancelled",
-		"phase":             "cancelled",
+		"phase":             "stopped",
+		"stopped":           true,
 	})
 	h.db.Model(&models.AIBackgroundTask{}).Where("id = ?", task.ID).Updates(map[string]interface{}{
 		"status":               "cancelled",

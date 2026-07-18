@@ -427,6 +427,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     createConversation,
     sendCompareMessages,
     retryCompareColumn,
+    rerunCompareForEditedUserMessage,
     sendMessage,
   } = useChatSendRuntime({
     apiBaseUrl: API_BASE_URL,
@@ -637,6 +638,7 @@ export function useChat(conversationId: number | undefined, models: ChatModel[],
     notebookFileIds,
     skillKey: effectiveSkillKey,
     translate: t,
+    rerunCompareForEditedUserMessage,
   });
 
   return {

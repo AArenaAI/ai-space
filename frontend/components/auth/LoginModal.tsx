@@ -7,6 +7,7 @@ import { useTheme } from "@/components/theme/ThemeProvider";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError } from "@/lib/errors";
 import { sendAuthEmailCode } from "@/lib/authEmailCode";
+import { applyAuthSession } from "@/lib/auth/state";
 import { toast } from "sonner";
 
 interface LoginModalProps {
@@ -131,11 +132,8 @@ export default function LoginModal({ isOpen, onClose, onLoginSuccess }: LoginMod
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      if (data.user?.default_workspace_id) localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
+      applyAuthSession({ user: data.user });
       import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
-      window.dispatchEvent(new Event("auth-changed"));
 
       onLoginSuccess?.(data, mode);
       onClose?.();

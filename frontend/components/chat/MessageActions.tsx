@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Columns3, Copy, MoreHorizontal, Pencil, RotateCcw, Share2, Star, StickyNote } from "lucide-react";
+import { Check, Columns3, Copy, MoreHorizontal, Pencil, RefreshCw, RotateCcw, Share2, Star, StickyNote } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/chatRenderProfile";
@@ -10,11 +10,13 @@ import { emitChatRenderProfileEvent, isChatRenderProfileEnabled } from "@/lib/ch
 export type MessageActionsProps = {
   onCopy: () => void;
   onEdit?: () => void;
+  onRetry?: () => void;
   onRegenerate?: () => void;
   onShareSelectMode: () => void;
   onFavoriteSelectMode?: () => void;
   isFavorited?: boolean;
   showRegenerate: boolean;
+  showRetry?: boolean;
   align: "left" | "right";
   visible: boolean;
   createdAt: number;
@@ -77,11 +79,13 @@ function MessageActionsProfileProbe({
 function MessageActions({
   onCopy,
   onEdit,
+  onRetry,
   onRegenerate,
   onShareSelectMode,
   onFavoriteSelectMode,
   isFavorited,
   showRegenerate,
+  showRetry,
   align,
   visible,
   createdAt,
@@ -95,6 +99,7 @@ function MessageActions({
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreMenuPosition, setMoreMenuPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!moreOpen) setMoreMenuPosition(null);
@@ -102,9 +107,9 @@ function MessageActions({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
-      }
+      if (moreRef.current && moreRef.current.contains(e.target as Node)) return;
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setMoreOpen(false);
     };
     if (moreOpen) {
       document.addEventListener("mousedown", handler);
@@ -214,6 +219,7 @@ function MessageActions({
           }}
           className="flex h-6 w-6 items-center justify-center rounded-lg text-text-tertiary hover:text-text-primary hover:bg-surface-elevated transition-colors"
           title={t("chat.action.more")}
+          data-testid="chat-message-actions-more"
         >
           <MoreHorizontal className="w-3.5 h-3.5" />
         </button>
@@ -221,6 +227,7 @@ function MessageActions({
           <>
             <div className="fixed inset-0 z-[90]" onClick={() => setMoreOpen(false)} />
             <div
+              ref={menuRef}
               className="fixed w-40 rounded-xl border border-surface-border bg-surface-elevated shadow-xl z-[100] py-2 px-3 animate-fade-in"
               style={moreMenuPosition}
             >
@@ -229,6 +236,17 @@ function MessageActions({
                   <span className="text-text-tertiary">{t("chat.action.startTime")}</span>
                   <span className="text-text-secondary">{formatTime(createdAt, language)}</span>
                 </div>
+                {showRetry && onRetry && (
+                  <button
+                    type="button"
+                    onClick={() => { onRetry(); setMoreOpen(false); }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-medium text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"
+                    data-testid="user-message-retry-action"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    {t("chat.action.retry")}
+                  </button>
+                )}
                 {onSaveToNote && (
                   <button
                     type="button"

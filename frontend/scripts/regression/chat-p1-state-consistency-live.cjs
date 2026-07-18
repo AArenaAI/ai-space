@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 async function apiJson(baseUrl, path, token, init = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -143,10 +143,10 @@ async function sendPromptFromUi(page, prompt) {
   const model = env('P1_STATE_MODEL', env('REAL_CHAT_MODEL', 'gpt-5.5'));
   const stamp = Date.now();
   const auth = await login({ baseUrl: apiBaseUrl });
-  const convA = await createConversation(apiBaseUrl, auth.token, `P1 state A ${stamp}`, model);
-  const convB = await createConversation(apiBaseUrl, auth.token, `P1 state B ${stamp}`, model);
+  const convA = await createConversation(apiBaseUrl, auth, `P1 state A ${stamp}`, model);
+  const convB = await createConversation(apiBaseUrl, auth, `P1 state B ${stamp}`, model);
   let cleanup;
-  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
+  const { browser, page } = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
   const events = { requests: [], responses: [], console: [], errors: [], requestfailed: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/') || u.includes('/api/conversations')) events.responses.push({ status: res.status(), url: u }); });
@@ -191,7 +191,7 @@ async function sendPromptFromUi(page, prompt) {
       samples.push(await sample(page, 'after-idle-wait'));
     }
 
-    const boot = await apiJson(apiBaseUrl, `/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
+    const boot = await apiJson(apiBaseUrl, `/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth);
     const latest = [...(boot.snapshot?.messages || [])].reverse().find((message) => message.role === 'assistant') || null;
     const analysis = analyze(samples);
     const result = {
@@ -223,14 +223,14 @@ async function sendPromptFromUi(page, prompt) {
       consoleErrors: summarizeConsole(events.console),
       pageErrors: events.errors,
     };
-    cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [convA.id, convB.id] });
+    cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [convA.id, convB.id] });
     result.cleanup = cleanup;
     printResult(result);
     if (!result.ok) process.exit(2);
   } finally {
     await browser.close().catch(() => {});
     if (!cleanup) {
-      await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [convA.id, convB.id] }).catch(() => {});
+      await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [convA.id, convB.id] }).catch(() => {});
     }
   }
 })().catch((error) => {

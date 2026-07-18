@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const assert = require('node:assert/strict');
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const apiBaseUrl = (env('USER_EDIT_MULTI_API_BASE_URL', env('USER_EDIT_API_BASE_URL', env('TESTNET_BASE_URL', 'http://127.0.0.1:19091'))) || '').replace(/\/+$/, '');
 const frontendBaseUrl = (env('USER_EDIT_MULTI_FRONTEND_BASE_URL', env('USER_EDIT_FRONTEND_BASE_URL', 'http://127.0.0.1:3000')) || '').replace(/\/+$/, '');
@@ -22,7 +22,7 @@ function redact(value) {
 async function apiJson(path, token, init = {}) {
   const res = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -51,6 +51,7 @@ async function sampleRows(page) {
       index,
       role: row.getAttribute('data-message-role'),
       id: row.getAttribute('data-message-id'),
+      renderKey: row.getAttribute('data-message-render-key'),
       serverId: row.getAttribute('data-server-message-id'),
       taskId: row.getAttribute('data-generation-task-id'),
       pending: row.querySelectorAll('[data-chat-pending-shell="true"]').length,
@@ -88,6 +89,8 @@ function messageSummary(messages) {
   }));
 }
 
+let lastReport;
+
 function assertBranchState(sample, label) {
   assert.equal(sample.userRows.length, 2, `${label}: should have two user rows after editing second turn`);
   assert.equal(sample.assistantRows.length, 2, `${label}: should have two assistant rows after editing second turn`);
@@ -101,17 +104,25 @@ function assertBranchState(sample, label) {
 
 (async () => {
   const report = { apiBaseUrl, frontendBaseUrl, model, stamp, firstToken, secondOriginalToken, thirdToken, secondEditedToken };
+  lastReport = report;
   let browser;
   let auth;
   let conversation;
   try {
     const health = await fetch(`${apiBaseUrl}/health`);
     assert.equal(health.ok, true, `backend health ${health.status}`);
-    const frontendHealth = await fetch(`${frontendBaseUrl}/chat/`);
-    assert.equal(frontendHealth.ok, true, `frontend health ${frontendHealth.status}`);
+    let frontendReady = false;
+    let lastFrontendStatus = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const frontendHealth = await fetch(`${frontendBaseUrl}/chat/`).catch(() => null);
+      lastFrontendStatus = frontendHealth?.status || 0;
+      if (frontendHealth?.ok) { frontendReady = true; break; }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    assert.equal(frontendReady, true, `frontend health ${lastFrontendStatus}`);
 
     auth = await login({ baseUrl: apiBaseUrl });
-    conversation = await apiJson('/api/conversations', auth.token, {
+    conversation = await apiJson('/api/conversations', auth, {
       method: 'POST',
       body: JSON.stringify({ title: `user edit multiturn live ${stamp}`, model }),
     });
@@ -119,7 +130,7 @@ function assertBranchState(sample, label) {
 
     const { browser: openedBrowser, page } = await openAuthedPage({
       baseUrl: frontendBaseUrl,
-      token: auth.token,
+      auth,
       user: auth.user,
       sessionToken: auth.sessionToken,
       refreshToken: auth.refreshToken,
@@ -178,7 +189,7 @@ function assertBranchState(sample, label) {
     assert.equal(patchResponses.some((item) => item.status === 200), true, `PATCH edit did not return 200: ${JSON.stringify(patchResponses)}`);
     assertBranchState(report.afterEdit, 'after edit');
 
-    const bootstrapAfterEdit = await apiJson(`/api/chat/bootstrap?id=${conversation.id}&message_tail=24&conversation_limit=20`, auth.token);
+    const bootstrapAfterEdit = await apiJson(`/api/chat/bootstrap?id=${conversation.id}&message_tail=24&conversation_limit=20`, auth);
     const persistedMessages = bootstrapAfterEdit.snapshot?.messages || [];
     report.persistedAfterEdit = messageSummary(persistedMessages);
     assert.equal(persistedMessages.filter((msg) => msg.role === 'user').length, 2, 'persisted should have two user rows after edit');
@@ -206,12 +217,13 @@ function assertBranchState(sample, label) {
   } finally {
     await browser?.close().catch(() => {});
     if (conversation?.id && auth?.token) {
-      report.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] }).catch((error) => ({ error: error.message }));
+      report.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] }).catch((error) => ({ error: error.message }));
     }
   }
   printResult(report);
   console.log('chat user message edit multiturn live passed');
 })().catch((error) => {
+  if (lastReport) console.error(redact(JSON.stringify(lastReport, null, 2)));
   console.error(redact(error.stack || error.message || error));
   process.exit(1);
 });

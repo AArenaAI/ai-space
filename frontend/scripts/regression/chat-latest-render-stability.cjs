@@ -55,16 +55,25 @@ async function login() {
   });
   if (!response.ok) throw new Error(`login ${response.status}: ${await response.text()}`);
   const data = await response.json();
-  return { token: data.token || data.access_token || data.accessToken, user: data.user || data.data?.user || { email } };
+  const setCookie = response.headers.get("set-cookie") || "";
+  const sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || "";
+  const refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || "";
+  return { sessionToken, refreshToken, user: data.user || data.data?.user || { email } };
 }
 
-async function installAuth(page, auth) {
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem("token", token);
+async function installAuth(context, page, auth) {
+  const domain = new URL(baseUrl).hostname;
+  const cookies = [];
+  if (auth.sessionToken) cookies.push({ name: "ai_space_session", value: auth.sessionToken, domain, path: "/", httpOnly: true, secure: baseUrl.startsWith("https:"), sameSite: "Lax" });
+  if (auth.refreshToken) cookies.push({ name: "ai_space_refresh_token", value: auth.refreshToken, domain, path: "/", httpOnly: true, secure: baseUrl.startsWith("https:"), sameSite: "Lax" });
+  if (cookies.length) await context.addCookies(cookies);
+  await page.addInitScript(({ user }) => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("admin_token");
     localStorage.setItem("user", JSON.stringify(user));
     localStorage.setItem("theme", "dark");
     window.__AI_SPACE_CHAT_PROFILE_ENABLED = true;
-  }, auth);
+  }, { user: auth.user });
 }
 
 function rowSnapshotScript(cid) {
@@ -121,13 +130,14 @@ async function sampleConversation(page, cid) {
 (async () => {
   const proxy = await createProxy();
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
   const failures = [];
   page.on("console", (message) => { if (message.type() === "error") failures.push(`console error: ${message.text()}`); });
   page.on("pageerror", (error) => failures.push(`page error: ${error.message}`));
   try {
     const auth = await login();
-    await installAuth(page, auth);
+    await installAuth(context, page, auth);
     const samples = [];
     for (const cid of conversations) samples.push(await sampleConversation(page, cid));
     const summary = {

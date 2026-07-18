@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { DEFAULT_BASE, env, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, DEFAULT_BASE, env, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const baseUrl = (env('CHAT_ACTIVITY_ENTRY_BASE_URL', env('BASE_URL', 'http://127.0.0.1:3210')) || DEFAULT_BASE).replace(/\/+$/, '');
 

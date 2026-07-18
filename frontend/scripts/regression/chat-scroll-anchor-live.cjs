@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { env, login, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { addAuthCookies, authHeaders, env, login, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
 const normalId = Number(env('SCROLL_NORMAL_ID', '1217'));
@@ -8,14 +8,17 @@ const compareId = Number(env('SCROLL_COMPARE_ID', '1218'));
 const rounds = Number(env('SCROLL_ROUNDS', '2'));
 const step = Number(env('SCROLL_STEP', '700'));
 
-async function openPage(token, user) {
+async function openPage(auth, user) {
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await addAuthCookies(context, { baseUrl, auth });
+  const page = await context.newPage();
+  await page.addInitScript(({ user }) => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin_token');
     localStorage.setItem('user', JSON.stringify(user));
     if (user?.default_workspace_id) localStorage.setItem('current-workspace', String(user.default_workspace_id));
-  }, { token, user });
+  }, { user });
   return { browser, page };
 }
 
@@ -118,7 +121,7 @@ async function runCase(page, id, kind) {
 (async () => {
   if (!normalId || !compareId) throw new Error('SCROLL_NORMAL_ID and SCROLL_COMPARE_ID are required');
   const auth = await login({ baseUrl });
-  const { browser, page } = await openPage(auth.token, auth.user);
+  const { browser, page } = await openPage(auth, auth.user);
   const events = { console: [], errors: [], requestfailed: [] };
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => events.errors.push(String(error).slice(0, 300)));

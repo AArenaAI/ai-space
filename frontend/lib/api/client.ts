@@ -1,5 +1,5 @@
 import { getGuestId } from "@/lib/guestId";
-import { ensureAuthSession, readAuthState } from "@/lib/auth/state";
+import { ensureAuthSession } from "@/lib/auth/state";
 
 export class ApiClientError extends Error {
   status: number;
@@ -38,12 +38,7 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   const headers = new Headers(options.headers);
   const body = options.body as BodyInit | null | undefined;
 
-  if (!headers.has("Authorization")) {
-    const token = readAuthState().token;
-    if (token && token !== "null" && token !== "undefined") {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-  }
+  headers.delete("Authorization");
   if (!headers.has("X-Guest-ID")) {
     const guestId = getGuestId();
     if (guestId) headers.set("X-Guest-ID", guestId);

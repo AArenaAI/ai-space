@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const { chromium } = require('playwright');
-const { env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { addAuthCookies, authHeaders, env, login, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 async function jsonFetch(url, options = {}) {
   const res = await fetch(url, options);
@@ -18,12 +18,12 @@ function yesterdayIso() {
 async function createConversation(baseUrl, token, title, model, updatedAt) {
   const conv = await jsonFetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({ title, model }),
   });
   await jsonFetch(`${baseUrl}/api/conversations/${conv.id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({ title, updated_at: updatedAt }),
   }).catch(() => undefined);
   return conv;
@@ -46,20 +46,23 @@ async function sidebarSnapshot(page) {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
   const model = env('SIDEBAR_HISTORY_MODEL', env('REAL_CHAT_MODEL', 'deepseek-v4-flash'));
   const auth = await login({ baseUrl });
-  const token = auth.token;
+  const token = auth;
   const stamp = Date.now();
   const target = await createConversation(baseUrl, token, `Sidebar yesterday target ${stamp}`, model, yesterdayIso());
   const peer = await createConversation(baseUrl, token, `Sidebar yesterday peer ${stamp}`, model, yesterdayIso());
   const browser = await chromium.launch({ headless: env('HEADFUL') !== '1' });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await addAuthCookies(context, { baseUrl, auth });
+  const page = await context.newPage();
   const consoleEvents = [];
   const pageErrors = [];
   const requests = [];
   page.on('console', (msg) => consoleEvents.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
   page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/conversations') || u.includes('/api/chat/bootstrap')) requests.push({ method: req.method(), url: u }); });
-  await page.addInitScript(({ token, user }) => {
-    localStorage.setItem('token', token);
+  await page.addInitScript(({ user }) => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin_token');
     localStorage.setItem('user', JSON.stringify(user));
   }, { token, user: auth.user });
   await page.goto(`${baseUrl}/chat/?id=${target.id}&sidebar_history_live=${stamp}`, { waitUntil: 'domcontentloaded', timeout: 60000 });

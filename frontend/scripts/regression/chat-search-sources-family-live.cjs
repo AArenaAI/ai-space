@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 function passwordFromCodes() {
   const codes = env('TESTNET_PASSWORD_CODES');
@@ -24,7 +24,7 @@ function parseSseDataChunk(raw) {
 
 async function streamTaskToDone({ baseUrl, token, taskId, timeoutMs = 180000 }) {
   const res = await fetch(`${baseUrl}/api/tasks/${taskId}/stream?after=0`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...authHeaders(token) },
   });
   if (!res.ok || !res.body) throw new Error(`stream task ${taskId} ${res.status}: ${await res.text()}`);
   const reader = res.body.getReader();
@@ -85,7 +85,7 @@ function latestAssistant(snapshot) {
 }
 
 async function createAndRun({ baseUrl, token, model, prompt }) {
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const headers = { 'Content-Type': 'application/json', ...authHeaders(token) };
   const conversation = await jsonFetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
     headers,
@@ -110,7 +110,7 @@ async function createAndRun({ baseUrl, token, model, prompt }) {
   if (!taskId) throw new Error(`missing task id for ${model}: ${JSON.stringify(init).slice(0, 500)}`);
   const stream = await streamTaskToDone({ baseUrl, token, taskId });
   const bootstrap = await jsonFetch(`${baseUrl}/api/chat/bootstrap?id=${conversation.id}&message_tail=16&conversation_limit=20`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { ...authHeaders(token) },
   });
   const assistant = latestAssistant(bootstrap);
   const sources = parseSources(assistant?.search_sources || assistant?.searchSources);
@@ -121,7 +121,7 @@ async function createAndRun({ baseUrl, token, model, prompt }) {
 async function inspectActivityPanel({ frontendBaseUrl, auth, conversationId }) {
   const { browser, page } = await openAuthedPage({
     baseUrl: frontendBaseUrl,
-    token: auth.token,
+    auth,
     user: auth.user,
     sessionToken: auth.sessionToken,
     refreshToken: auth.refreshToken,
@@ -177,7 +177,7 @@ async function inspectActivityPanel({ frontendBaseUrl, auth, conversationId }) {
   const conversationIds = [];
   try {
     for (const model of models) {
-      const run = await createAndRun({ baseUrl: apiBaseUrl, token: auth.token, model, prompt });
+      const run = await createAndRun({ baseUrl: apiBaseUrl, auth, model, prompt });
       conversationIds.push(run.conversation.id);
       const activity = await inspectActivityPanel({ frontendBaseUrl, auth, conversationId: run.conversation.id });
       results.push({
@@ -194,7 +194,7 @@ async function inspectActivityPanel({ frontendBaseUrl, auth, conversationId }) {
     }
   } finally {
     if (env('KEEP_LIVE_CONVERSATIONS') !== '1') {
-      await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds }).catch(() => {});
+      await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds }).catch(() => {});
     }
   }
 

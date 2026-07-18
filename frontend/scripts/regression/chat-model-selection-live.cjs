@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const apiBaseUrl = trim(env('MODEL_SELECTION_API_BASE_URL', env('REAL_CHAT_API_BASE_URL', env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz'))));
 const frontendBaseUrl = trim(env('MODEL_SELECTION_FRONTEND_BASE_URL', env('REAL_CHAT_FRONTEND_BASE_URL', apiBaseUrl)));
@@ -18,7 +18,7 @@ function redact(value) {
 async function apiJson(path, token, init = {}) {
   const res = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -64,7 +64,7 @@ async function waitForUiAnswer(page, needle) {
   try {
     assert(compareTargets.length === 2, 'Need exactly two compare target models');
     auth = await login({ baseUrl: apiBaseUrl });
-    const opened = await openAuthedPage({ baseUrl: frontendBaseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
+    const opened = await openAuthedPage({ baseUrl: frontendBaseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken, viewport: { width: 1440, height: 980 } });
     browser = opened.browser;
     const page = opened.page;
     const consoleEvents = [];
@@ -74,7 +74,7 @@ async function waitForUiAnswer(page, needle) {
     page.on('pageerror', (error) => pageErrors.push(String(error).slice(0, 300)));
     page.on('requestfailed', (request) => requestFailed.push({ method: request.method(), url: request.url(), failure: request.failure()?.errorText || '' }));
 
-    const normalConv = await apiJson('/api/conversations', auth.token, { method: 'POST', body: JSON.stringify({ title: `model normal live ${startedAt}`, model: 'gpt-5.4-mini' }) });
+    const normalConv = await apiJson('/api/conversations', auth, { method: 'POST', body: JSON.stringify({ title: `model normal live ${startedAt}`, model: 'gpt-5.4-mini' }) });
     cleanupIds.push(normalConv.id);
     await page.addInitScript(({ selected }) => {
       localStorage.setItem('selected-model', selected);
@@ -93,7 +93,7 @@ async function waitForUiAnswer(page, needle) {
     const normalBeforeReload = await page.evaluate(() => ({ selected: localStorage.getItem('selected-model'), recent: localStorage.getItem('recent-models') }));
     let normalPersistedModel = '';
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const conversationData = await apiJson(`/api/conversations/${normalConv.id}?message_tail=2`, auth.token);
+      const conversationData = await apiJson(`/api/conversations/${normalConv.id}?message_tail=2`, auth);
       normalPersistedModel = conversationData.model || conversationData.conversation?.model || '';
       if (normalPersistedModel === normalTarget) break;
       await page.waitForTimeout(400);
@@ -111,7 +111,7 @@ async function waitForUiAnswer(page, needle) {
     await waitForUiAnswer(page, normalPromptToken).catch(() => {});
     result.normal = { beforeReload: normalBeforeReload, persistedModel: normalPersistedModel, reloadModelId: normalReloadModelId, requestModel: normalBody.model };
 
-    const compareConv = await apiJson('/api/conversations', auth.token, { method: 'POST', body: JSON.stringify({ title: `model compare live ${startedAt}`, model: 'gpt-5.4-mini' }) });
+    const compareConv = await apiJson('/api/conversations', auth, { method: 'POST', body: JSON.stringify({ title: `model compare live ${startedAt}`, model: 'gpt-5.4-mini' }) });
     cleanupIds.push(compareConv.id);
     await page.goto(`${frontendBaseUrl}/chat/?id=${compareConv.id}&model_selection_compare_live=${startedAt}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
@@ -124,7 +124,7 @@ async function waitForUiAnswer(page, needle) {
     await page.waitForTimeout(1200);
     const compareHeaderIds = await compareHeader.locator('[data-testid="model-selector-trigger"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-model-id')));
     const compareStorage = await page.evaluate(() => ({ mode: localStorage.getItem('compare-mode'), models: localStorage.getItem('compare-models') }));
-    const comparePersisted = await apiJson(`/api/conversations/${compareConv.id}?message_tail=2`, auth.token).then((data) => data.compare_models || data.conversation?.compare_models || '').catch((error) => `ERROR: ${error.message}`);
+    const comparePersisted = await apiJson(`/api/conversations/${compareConv.id}?message_tail=2`, auth).then((data) => data.compare_models || data.conversation?.compare_models || '').catch((error) => `ERROR: ${error.message}`);
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
     const reloadedHeader = page.locator('[data-testid="chat-compare-header"]').first();
@@ -156,7 +156,7 @@ async function waitForUiAnswer(page, needle) {
   } finally {
     await browser?.close().catch(() => {});
     if (auth?.token && cleanupIds.length) {
-      result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: cleanupIds }).catch((error) => ({ error: error.message }));
+      result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: cleanupIds }).catch((error) => ({ error: error.message }));
     }
   }
   printResult(result);

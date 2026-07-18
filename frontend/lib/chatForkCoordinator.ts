@@ -1,6 +1,7 @@
 import { normalizeError, readApiError } from "@/lib/errors";
 import type { RuntimePhase } from "@/lib/streaming";
 import type { ChatStatusTimelineStep } from "@/lib/chatStatusTimeline";
+import type { UserSendStatus } from "@/lib/chatTypes";
 
 function getClientTimezone(): string | undefined {
   if (typeof Intl === "undefined") return undefined;
@@ -37,6 +38,11 @@ export type ForkChatPersistedMessage = {
   phase?: string | null;
   status_timeline?: unknown;
   statusTimeline?: unknown;
+  // 前端本地发送身份
+  client_message_id?: string | null;
+  local_run_id?: string | null;
+  send_status?: string | null;
+  stopped?: boolean | null;
 };
 
 export type ForkChatMessage = {
@@ -62,6 +68,11 @@ export type ForkChatMessage = {
   serverGenerationStatus?: string;
   phase?: RuntimePhase;
   statusTimeline?: ChatStatusTimelineStep[];
+  // 前端本地发送身份
+  clientMessageId?: string;
+  localRunId?: string;
+  sendStatus?: UserSendStatus;
+  stopped?: boolean;
 };
 
 export type ForkChatResponse = {
@@ -110,6 +121,11 @@ export function parsePersistedStatusTimeline(raw: Pick<ForkChatPersistedMessage,
   return steps.length ? steps : undefined;
 }
 
+function isPersistedGenerationCancelledNotice(content?: string | null): boolean {
+  const text = (content || "").trim().toLowerCase();
+  return text === "生成失败: generation cancelled" || text === "generation cancelled" || text.includes("generation cancelled");
+}
+
 function normalizePersistedPhase(phase?: string | null): RuntimePhase | undefined {
   if (!phase) return undefined;
   if (phase === "queued") return "starting";
@@ -137,9 +153,12 @@ export function mapPersistedChatMessage(
       : typeof message.thinking === "string"
         ? message.thinking
         : "";
-  const content = message.role === "assistant" && reasoningContent.trim() && !/<think>[\s\S]*?<\/think>/i.test(message.content || "")
-    ? `<think>${reasoningContent}</think>\n\n${message.content || ""}`.trim()
-    : message.content;
+  const isCancelledNotice = message.role === "assistant" && isPersistedGenerationCancelledNotice(message.content);
+  const content = isCancelledNotice
+    ? ""
+    : message.role === "assistant" && reasoningContent.trim() && !/<think>[\s\S]*?<\/think>/i.test(message.content || "")
+      ? `<think>${reasoningContent}</think>\n\n${message.content || ""}`.trim()
+      : message.content;
   return {
     id: String(message.id || options.fallbackId()),
     role: message.role,
@@ -163,6 +182,12 @@ export function mapPersistedChatMessage(
     serverGenerationStatus: message.server_generation_status || message.generation_status || undefined,
     phase: normalizePersistedPhase(message.phase),
     statusTimeline: parsePersistedStatusTimeline(message),
+    // 前端本地发送身份
+    clientMessageId: message.client_message_id || undefined,
+    localRunId: message.local_run_id || undefined,
+    sendStatus: (message.send_status as UserSendStatus) || undefined,
+    // stopped 是长期持久化字段；phase/generation_status 兼容旧数据与旧后端进程刷新。
+    stopped: Boolean(message.stopped || message.phase === "stopped" || message.phase === "cancelled" || message.generation_status === "cancelled" || isCancelledNotice) || undefined,
   };
 }
 

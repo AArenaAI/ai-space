@@ -13,7 +13,6 @@ export interface AuthSessionUser {
 }
 
 export interface AuthSessionSnapshot {
-  token?: string;
   user: AuthSessionUser;
 }
 
@@ -23,7 +22,7 @@ async function parseAuthSessionResponse(res: Response, errorPrefix: string): Pro
 
   const data = await res.json();
   if (!data?.user) return null;
-  return { token: data.token, user: data.user };
+  return { user: data.user };
 }
 
 export async function fetchAuthSession(): Promise<AuthSessionSnapshot | null> {
@@ -48,9 +47,7 @@ export async function refreshAuthSession(): Promise<AuthSessionSnapshot | null> 
 
 export function storeAuthUserSnapshot(snapshot: AuthSessionSnapshot | AuthSessionUser) {
   const user = "user" in snapshot ? snapshot.user : snapshot;
-  if ("token" in snapshot && snapshot.token) {
-    localStorage.setItem("token", snapshot.token);
-  }
+  localStorage.removeItem("token");
   localStorage.setItem("user", JSON.stringify(user));
   if (user.default_workspace_id) {
     localStorage.setItem("current-workspace", String(user.default_workspace_id));

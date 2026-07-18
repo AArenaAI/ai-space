@@ -21,6 +21,16 @@ assert.ok(hook.includes('conversation-deleted'), 'hook should own conversation-d
 assert.ok(hook.includes('patchConversation') && hook.includes('removeConversation') && hook.includes('applyConversationActivity'), 'hook should expose one optimistic sidebar action pipeline');
 assert.ok(hook.includes('before_activity_at') && hook.includes('before_id'), 'hook should own cursor pagination params');
 assert.ok(hook.includes('chat-bootstrap-ready'), 'hook should merge bootstrap sidebar payloads');
+assert.ok(hook.includes('enabled?: boolean'), 'shared sidebar history hook should support disabled consumers');
+assert.ok(hook.includes('useBootstrapSeed?: boolean'), 'shared sidebar history hook should gate partial bootstrap sidebar seeds');
+assert.ok(hook.includes('if (!useBootstrapSeed) return;'), 'partial bootstrap sidebar history should not render unless explicitly enabled');
+assert.ok(hook.includes('if (!effectiveWorkspaceId) return;'), 'shared sidebar history hook should not fetch all-workspace history before workspace is known');
+assert.ok(hook.includes('sidebarConversationPageInflight'), 'shared sidebar history hook should de-dupe identical in-flight canonical page requests');
+assert.ok(hook.includes('readCanonicalConversationCache'), 'shared sidebar history hook should show complete canonical cache before background revalidation');
+assert.ok(hook.includes('writeCanonicalConversationCache'), 'shared sidebar history hook should persist complete canonical pages for stable next paint');
+assert.ok(hook.includes('sidebarConversationPageRecent'), 'shared sidebar history hook should suppress immediate sequential duplicate canonical fetches');
+assert.ok(hook.includes('prev.length > 0 ? prev : []'), 'sidebar history should not clear visible canonical cache during transient auth bootstrap');
+assert.ok(hook.includes('if (enabled) return;') && hook.includes('setConversationState([])'), 'disabled sidebar history consumers should not keep hidden cached rows mounted');
 assert.ok(metadataEvents.includes('normalizeConversationMetadataEventDetail'), 'shared conversation metadata event normalizer should exist');
 assert.ok(
   metadataEvents.includes('eventType === "conversation-renamed"')
@@ -59,7 +69,10 @@ for (const [name, source] of [['MobileNav', mobile], ['AppSidebar', desktop]]) {
 }
 
 assert.ok(!mobile.includes('cachedConversationsMobile'), 'MobileNav should not keep its own module cache');
+assert.ok(mobile.includes('enabled: menuOpen'), 'MobileNav should not fetch/render sidebar history while the drawer is closed on desktop');
+assert.ok(mobile.includes('useBootstrapSeed: false'), 'MobileNav should not render partial bootstrap sidebar history before canonical load');
 assert.ok(!desktop.includes('cachedConversations'), 'AppSidebar should not keep its own module cache');
+assert.ok(desktop.includes('useBootstrapSeed: false'), 'AppSidebar should render canonical sidebar history in one pass instead of partial bootstrap seed');
 assert.ok(desktop.includes('clearChatSidebarHistoryCache(`desktop:${currentWS?.id || "all"}`)'), 'AppSidebar should clear the shared cache on workspace/logout transitions');
 
 console.log('chat sidebar history hook static regression passed');

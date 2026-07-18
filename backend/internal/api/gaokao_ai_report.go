@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -37,7 +40,67 @@ type gaokaoAICandidatePayload struct {
 	Candidates []gaokaoAICandidate `json:"candidates"`
 }
 
-func generateGaokaoReportWithAIService(ctx context.Context, ai chatAIService, searchService *services.SearchService, profile services.GaokaoProfile, message, track string, recs []services.GaokaoRecommendation, links []services.GaokaoAdvisorEvidenceLink) (string, string, error) {
+type gaokaoReportUsageRecorder struct {
+	usageService *services.UsageService
+	userID       uint
+	guestID      string
+	requestID    string
+}
+
+func (r gaokaoReportUsageRecorder) record(model, operation string, messages []services.Message, output string, started time.Time) {
+	if r.usageService == nil {
+		return
+	}
+	inputText := ""
+	for _, m := range messages {
+		inputText += m.Role + ":\n" + m.Content + "\n\n"
+	}
+	usage := &services.TokenUsage{
+		PromptTokens:     estimateGaokaoUsageTokens(inputText),
+		CompletionTokens: estimateGaokaoUsageTokens(output),
+		Estimated:        true,
+		Raw: map[string]any{
+			"estimated_reason": "gaokao_report_nonstream_text_response_usage_missing",
+			"input_chars":      len([]rune(inputText)),
+			"output_chars":     len([]rune(output)),
+		},
+	}
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	provider := "openai"
+	modelType := "openai_responses"
+	lowerModel := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(lowerModel, "deepseek"):
+		provider = "deepseek"
+		modelType = "deepseek"
+	case strings.HasPrefix(lowerModel, "gemini"):
+		provider = "gemini"
+		modelType = "gemini"
+	case strings.HasPrefix(lowerModel, "kimi") || strings.HasPrefix(lowerModel, "moonshot"):
+		provider = "moonshot"
+		modelType = "moonshot"
+	}
+	_ = r.usageService.RecordChatUsageWithContext(r.userID, provider, model, modelType, services.UsageContext{
+		GuestID:      r.guestID,
+		ResourceType: "gaokao_report",
+		RequestID:    r.requestID,
+		LatencyMs:    int(time.Since(started).Milliseconds()),
+		Module:       "work",
+		Feature:      "gaokao-volunteer",
+		Operation:    operation,
+	}, usage)
+}
+
+func estimateGaokaoUsageTokens(text string) int {
+	n := len([]rune(text))
+	if n <= 0 {
+		return 0
+	}
+	// 中文报告和 JSON 材料以中文为主，按“约 1 个汉字≈1 token”做保守估算。
+	return n
+}
+
+func generateGaokaoReportWithAIService(ctx context.Context, ai chatAIService, searchService *services.SearchService, usageRecorder gaokaoReportUsageRecorder, profile services.GaokaoProfile, message, track string, recs []services.GaokaoRecommendation, links []services.GaokaoAdvisorEvidenceLink) (string, string, error) {
 	if ai == nil {
 		return "", "ai_service_missing", fmt.Errorf("AIService 未注入")
 	}
@@ -46,7 +109,10 @@ func generateGaokaoReportWithAIService(ctx context.Context, ai chatAIService, se
 
 	seedMaterials := gaokaoCandidateMaterials(profile, recs)
 	candidatePrompt := buildGaokaoCandidatePrompt(profile, message, track, seedMaterials)
-	candidateText, err := callGaokaoAIText(ctx, ai, "gpt-5.5", []services.Message{{Role: "system", Content: "你是高考志愿规划师。必须联网查询最新可用投档线/最低位次/招生信息，再返回严格 JSON，不要 Markdown。"}, {Role: "user", Content: candidatePrompt}}, true)
+	candidateMessages := []services.Message{{Role: "system", Content: "你是高考志愿规划师。必须联网查询最新可用投档线/最低位次/招生信息，再返回严格 JSON，不要 Markdown。"}, {Role: "user", Content: candidatePrompt}}
+	started := time.Now()
+	candidateText, err := callGaokaoAIText(ctx, ai, "gpt-5.5", candidateMessages, true)
+	usageRecorder.record("gpt-5.5", "gaokao_candidate_generation", candidateMessages, candidateText, started)
 	if err != nil {
 		return "", "candidate_error", err
 	}
@@ -60,21 +126,190 @@ func generateGaokaoReportWithAIService(ctx context.Context, ai chatAIService, se
 	}
 	// DeepSeek only provides review/correction advice. It must not directly mutate the table;
 	// the second GPT pass receives GPT candidates + DS review and rewrites the final plan.
-	dsReviewText, err := buildGaokaoDeepSeekReviewAdvice(ctx, ai, searchService, profile, track, validated)
+	dsReviewText, err := buildGaokaoDeepSeekReviewAdvice(ctx, ai, searchService, usageRecorder, profile, track, validated)
 	if err != nil {
 		return "", "deepseek_review_failed", fmt.Errorf("DeepSeek 联网复核意见生成失败: %w", err)
 	}
 
 	finalPrompt := buildGaokaoFinalAIPromptWithReview(profile, message, track, validated, dsReviewText, links)
-	markdown, err := callGaokaoAIText(ctx, ai, "gpt-5.5", []services.Message{{Role: "system", Content: "你是资深高考志愿规划师。输出完整中文 Markdown 报告。你必须综合第一轮 GPT 候选和 DeepSeek 复核意见，自行重整最终候选；DeepSeek 只提供整改意见，不是最终表格。可联网核对来源。"}, {Role: "user", Content: finalPrompt}}, true)
+	finalMessages := []services.Message{{Role: "system", Content: "你是资深高考志愿规划师。输出完整中文 Markdown 报告。你必须综合第一轮 GPT 候选和 DeepSeek 复核意见，自行重整最终候选；DeepSeek 只提供整改意见，不是最终表格。可联网核对来源。"}, {Role: "user", Content: finalPrompt}}
+	started = time.Now()
+	markdown, err := callGaokaoAIText(ctx, ai, "gpt-5.5", finalMessages, true)
+	usageRecorder.record("gpt-5.5", "gaokao_final_report_generation", finalMessages, markdown, started)
 	if err != nil {
 		return "", "final_error", err
 	}
-	markdown = strings.TrimSpace(markdown)
+	markdown = services.SanitizeGaokaoFinalReportMarkdown(strings.TrimSpace(markdown))
 	if err := validateGaokaoFinalMarkdown(profile, markdown, validated); err != nil {
 		return "", "postcheck_failed", err
 	}
 	return markdown, "ai_service:gpt-5.5:candidates+hardfilter+final+postcheck", nil
+}
+
+func generateGaokaoReportWithCliproxyCommittee(ctx context.Context, ai chatAIService, searchService *services.SearchService, usageRecorder gaokaoReportUsageRecorder, profile services.GaokaoProfile, message, track string, recs []services.GaokaoRecommendation, links []services.GaokaoAdvisorEvidenceLink) (string, string, error) {
+	if ai == nil {
+		return "", "ai_service_missing", fmt.Errorf("AIService 未注入")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
+	defer cancel()
+	candidatePrompt := buildGaokaoCandidatePrompt(profile, message, track, gaokaoCandidateMaterials(profile, recs))
+	candidateMessages := []services.Message{{Role: "system", Content: "你是高考志愿规划师。必须返回严格 JSON，不要 Markdown。"}, {Role: "user", Content: candidatePrompt}}
+	started := time.Now()
+	candidateText, err := callCliproxyChatText(ctx, "gpt-5.5", candidateMessages)
+	usageRecorder.record("gpt-5.5", "gaokao_clip_candidate_generation", candidateMessages, candidateText, started)
+	if err != nil {
+		return "", "clip_candidate_error", err
+	}
+	validated := validateGaokaoAICandidates(profile, parseGaokaoAICandidates(candidateText), track)
+	if len(validated) == 0 {
+		validated = validateGaokaoAICandidates(profile, recsToGaokaoAICandidates(profile, recs), track)
+	}
+	if len(validated) == 0 {
+		validated = validateGaokaoAICandidates(profile, recsToGaokaoAICandidates(profile, services.BuildGaokaoProfessionalSeedRecommendations(profile)), track)
+	}
+	if len(validated) == 0 {
+		return "", "clip_no_validated_candidates", fmt.Errorf("cliproxy 候选没有通过硬过滤")
+	}
+	dsReviewText, err := buildGaokaoDeepSeekReviewAdvice(ctx, ai, searchService, usageRecorder, profile, track, validated)
+	if err != nil {
+		return "", "clip_deepseek_review_failed", err
+	}
+	finalPrompt := buildGaokaoFinalAIPromptWithReview(profile, message, track, validated, dsReviewText, links)
+	finalMessages := []services.Message{{Role: "system", Content: "你是资深高考志愿规划师。输出完整中文 Markdown 报告。严格沿用用户可读报告风格，不暴露模型流程。"}, {Role: "user", Content: finalPrompt}}
+	started = time.Now()
+	markdown, err := callCliproxyChatText(ctx, "gpt-5.5", finalMessages)
+	usageRecorder.record("gpt-5.5", "gaokao_clip_final_report_generation", finalMessages, markdown, started)
+	if err != nil {
+		return "", "clip_final_error", err
+	}
+	markdown = services.SanitizeGaokaoFinalReportMarkdown(strings.TrimSpace(markdown))
+	if err := validateGaokaoFinalMarkdown(profile, markdown, validated); err != nil {
+		return "", "clip_postcheck_failed", err
+	}
+	return markdown, "ai_service:cliproxy:gpt-5.5+ds+gpt-5.5", nil
+}
+
+func generateGaokaoReportWithMultiCandidateV2(ctx context.Context, ai chatAIService, searchService *services.SearchService, usageRecorder gaokaoReportUsageRecorder, profile services.GaokaoProfile, message, track string, recs []services.GaokaoRecommendation, links []services.GaokaoAdvisorEvidenceLink) (string, string, error) {
+	if ai == nil {
+		return "", "ai_service_missing", fmt.Errorf("AIService 未注入")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	candidatePrompt := buildGaokaoCandidatePrompt(profile, message, track, gaokaoCandidateMaterials(profile, recs))
+	type candRun struct{ model, operation string }
+	runs := []candRun{{"gpt-5.4-mini", "gaokao_v2_candidate_54mini"}, {"gemini-3.1-flash-lite", "gaokao_v2_candidate_gemini"}, {"deepseek-v4-pro", "gaokao_v2_candidate_deepseek"}}
+	texts := make([]string, len(runs))
+	var wg sync.WaitGroup
+	for i, run := range runs {
+		i, run := i, run
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			messages := []services.Message{{Role: "system", Content: "你是高考志愿规划师。必须返回严格 JSON，不要 Markdown。"}, {Role: "user", Content: candidatePrompt}}
+			started := time.Now()
+			text, err := callGaokaoAIText(ctx, ai, run.model, messages, false)
+			usageRecorder.record(run.model, run.operation, messages, text, started)
+			if err == nil {
+				texts[i] = text
+			}
+		}()
+	}
+	wg.Wait()
+	candidates := []gaokaoAICandidate{}
+	for _, text := range texts {
+		candidates = append(candidates, parseGaokaoAICandidates(text)...)
+	}
+	if len(candidates) == 0 {
+		return "", "v2_no_candidate_output", fmt.Errorf("三路候选均未返回可解析候选")
+	}
+	mergedText, err := mergeGaokaoV2Candidates(ctx, ai, usageRecorder, profile, message, track, candidates)
+	if err != nil {
+		return "", "v2_merge_failed", err
+	}
+	validated := validateGaokaoAICandidates(profile, parseGaokaoAICandidates(mergedText), track)
+	if len(validated) == 0 {
+		validated = validateGaokaoAICandidates(profile, candidates, track)
+	}
+	if len(validated) == 0 {
+		validated = validateGaokaoAICandidates(profile, recsToGaokaoAICandidates(profile, recs), track)
+	}
+	if len(validated) == 0 {
+		validated = validateGaokaoAICandidates(profile, recsToGaokaoAICandidates(profile, services.BuildGaokaoProfessionalSeedRecommendations(profile)), track)
+	}
+	if len(validated) == 0 {
+		return "", "v2_no_validated_candidates", fmt.Errorf("多模型候选没有通过硬过滤")
+	}
+	dsReviewText, err := buildGaokaoDeepSeekReviewAdvice(ctx, ai, searchService, usageRecorder, profile, track, validated)
+	if err != nil {
+		return "", "v2_deepseek_review_failed", err
+	}
+	finalPrompt := buildGaokaoFinalAIPromptWithReview(profile, message, track, validated, dsReviewText, links)
+	finalMessages := []services.Message{{Role: "system", Content: "你是资深高考志愿规划师。输出完整中文 Markdown 报告。严格沿用用户可读报告风格，不暴露模型流程。"}, {Role: "user", Content: finalPrompt}}
+	started := time.Now()
+	markdown, err := callGaokaoAIText(ctx, ai, "gpt-5.4", finalMessages, true)
+	usageRecorder.record("gpt-5.4", "gaokao_v2_final_report_generation", finalMessages, markdown, started)
+	if err != nil {
+		return "", "v2_final_failed", err
+	}
+	markdown = services.SanitizeGaokaoFinalReportMarkdown(strings.TrimSpace(markdown))
+	if err := validateGaokaoFinalMarkdown(profile, markdown, validated); err != nil {
+		return "", "v2_postcheck_failed", err
+	}
+	return markdown, "ai_service:v2:5.4mini+gemini+ds_merge+ds_review+5.4_final", nil
+}
+
+func callCliproxyChatText(ctx context.Context, model string, messages []services.Message) (string, error) {
+	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")), "/")
+	// WebUI/本机后端不在 Docker DNS 内时，cli-proxy-api 这个 service name 解析不到；本机订阅号代理监听 8317。
+	if strings.Contains(baseURL, "cli-proxy-api:8317") {
+		baseURL = strings.Replace(baseURL, "cli-proxy-api:8317", "127.0.0.1:8317", 1)
+	}
+	if apiKey == "" || baseURL == "" {
+		return "", fmt.Errorf("未配置 cliproxy OPENAI_API_KEY/OPENAI_BASE_URL")
+	}
+	type chatMessage struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	payloadMessages := make([]chatMessage, 0, len(messages))
+	for _, m := range messages {
+		payloadMessages = append(payloadMessages, chatMessage{Role: m.Role, Content: m.Content})
+	}
+	payload := map[string]any{"model": model, "messages": payloadMessages, "stream": false, "max_tokens": 12000}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("cliproxy chat completion status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &out); err != nil {
+		return strings.TrimSpace(string(respBody)), nil
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("cliproxy 返回空 choices")
+	}
+	return strings.TrimSpace(stripGaokaoThinkBlock(out.Choices[0].Message.Content)), nil
 }
 
 func callGaokaoAIText(ctx context.Context, ai chatAIService, model string, messages []services.Message, searchEnabled ...bool) (string, error) {
@@ -157,6 +392,10 @@ func gaokaoTrackBatchLabel(track string) string {
 
 func buildGaokaoCandidatePrompt(profile services.GaokaoProfile, message, track, materials string) string {
 	batchLabel := gaokaoTrackBatchLabel(track)
+	rankGuard := "不得推荐与考生位次明显不匹配的院校；冲稳保必须围绕考生真实位次形成梯度。"
+	if profile.Rank > 0 && profile.Rank < 100000 {
+		rankGuard = fmt.Sprintf("位次%d左右的高位次考生，严禁推荐录取位次约18万/19万/20万的低层级院校。", profile.Rank)
+	}
 	return fmt.Sprintf(`请为高考志愿规划生成候选院校 JSON。
 
 考生：%s，%s，%d分，位次%d。
@@ -169,19 +408,41 @@ func buildGaokaoCandidatePrompt(profile services.GaokaoProfile, message, track, 
 
 硬规则：
 1. 先按全国范围规划，不要把考试省份误当城市偏好。
-2. 位次%d左右的考生，严禁推荐录取位次约18万/19万/20万的院校。
+2. %s。
 3. 民办本科、职业本科、独立学院不是一律禁入；只有在其 verified_min_rank 与考生位次匹配、能作为合理保底/稳妥、且不违背用户学校类型偏好时才可推荐。严禁把录取位次远低于考生层次的民办/职业本科推荐给高位次考生。
 4. 层次必须写清：985/211/双一流/公办一本/公办二本/民办本科/职业本科/专科。
 5. reference_rank_min/reference_rank_max 使用整数位次。若只有区间，如2.4万-2.6万，填 24000/26000。
 6. 推荐专业如能查到真实专业/专业组最低位次，必须写成“专业名[专业最低位次:整数]”；查不到就只写专业名，禁止复制学校最低位次。
-7. 输出 12-18 所，必须有真实梯度：冲刺院校约占 25%%-35%%，其学校最低位次应略优于考生位次（例如 4万位考生要包含约3.3万-3.9万位的冲刺），稳位接近考生位次，保底低于考生位次；禁止全部推荐比考生位次更低门槛的稳保学校。
+7. 本科专项输出 12-18 所；专科专项优先输出 28 所，按“冲刺 6 所 + 临界稳 6 所 + 稳妥 8 所 + 保底 8 所”组织。必须有真实梯度：冲刺院校最低位次应略优于考生位次，临界稳接近考生位次，稳妥和保底低于考生位次；禁止全部推荐比考生位次更低门槛的稳保学校。
 8. 不要输出解释文字。
 
 参考材料（可参考但不必照搬；若材料不合理，以志愿规划常识修正）：
 %s
 
 严格返回 JSON：
-{"candidates":[{"school":"","city":"","level":"公办一本","recommended_majors":["自动化[专业最低位次:38620]"],"reference_rank":"3.8万-4.2万","reference_rank_min":38000,"reference_rank_max":42000,"band":"稳","reason":"","employment":""}]}`, profile.Province, profile.Subjects, profile.Score, profile.Rank, track, batchLabel, strings.Join(profile.PreferredMajors, "、"), strings.Join(profile.RejectedMajors, "、"), strings.Join(profile.PreferredCities, "、"), message, profile.Rank, materials)
+{"candidates":[{"school":"","city":"","level":"公办一本","recommended_majors":["自动化[专业最低位次:38620]"],"reference_rank":"3.8万-4.2万","reference_rank_min":38000,"reference_rank_max":42000,"band":"稳","reason":"","employment":""}]}`, profile.Province, profile.Subjects, profile.Score, profile.Rank, track, batchLabel, strings.Join(profile.PreferredMajors, "、"), strings.Join(profile.RejectedMajors, "、"), strings.Join(profile.PreferredCities, "、"), message, rankGuard, materials)
+}
+
+func mergeGaokaoV2Candidates(ctx context.Context, ai chatAIService, usageRecorder gaokaoReportUsageRecorder, profile services.GaokaoProfile, message, track string, candidates []gaokaoAICandidate) (string, error) {
+	payload, _ := json.MarshalIndent(candidates, "", "  ")
+	prompt := fmt.Sprintf(`三份模型候选如下。请去重、按%s批次口径硬整理成新版候选 JSON。
+考生：%s，%s，%d分，位次%d。用户补充：%s。
+要求：
+1. 只保留%s对应批次，不得混入其它批次。
+2. 删除明显位次不匹配、层次不匹配、选科不匹配的学校。
+3. 专科专项要区分“本科院校专科专业”和“专科/高职高专”。
+4. 推荐专业如有专业最低位次保留为“专业名[专业最低位次:整数]”；没有就只写专业名。
+5. 输出 12-18 所，有冲稳保梯度。
+6. 只返回 JSON，不要 Markdown。
+候选：
+%s
+
+严格返回：{"candidates":[{"school":"","city":"","level":"","recommended_majors":[""],"reference_rank":"","reference_rank_min":0,"reference_rank_max":0,"band":"稳","reason":"","employment":""}]}`, track, profile.Province, profile.Subjects, profile.Score, profile.Rank, message, track, string(payload))
+	messages := []services.Message{{Role: "system", Content: "你是高考志愿多模型候选整理器，只返回严格 JSON。"}, {Role: "user", Content: prompt}}
+	started := time.Now()
+	text, err := callGaokaoAIText(ctx, ai, "deepseek-v4-pro", messages, false)
+	usageRecorder.record("deepseek-v4-pro", "gaokao_v2_deepseek_merge", messages, text, started)
+	return text, err
 }
 
 func gaokaoCandidateMaterials(profile services.GaokaoProfile, recs []services.GaokaoRecommendation) string {
@@ -264,8 +525,12 @@ func validateGaokaoAICandidates(profile services.GaokaoProfile, in []gaokaoAICan
 		out = append(out, c)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return gaokaoBandOrder(out[i].Band) < gaokaoBandOrder(out[j].Band) })
-	if len(out) > 16 {
-		return out[:16]
+	limit := 16
+	if strings.Contains(track, "专科") || strings.EqualFold(track, "college") {
+		limit = 28
+	}
+	if len(out) > limit {
+		return out[:limit]
 	}
 	return out
 }
@@ -368,7 +633,7 @@ func extractGaokaoAIJSONObject(content string) string {
 	return content
 }
 
-func buildGaokaoDeepSeekReviewAdvice(ctx context.Context, ai chatAIService, searchService *services.SearchService, profile services.GaokaoProfile, track string, in []gaokaoAICandidate) (string, error) {
+func buildGaokaoDeepSeekReviewAdvice(ctx context.Context, ai chatAIService, searchService *services.SearchService, usageRecorder gaokaoReportUsageRecorder, profile services.GaokaoProfile, track string, in []gaokaoAICandidate) (string, error) {
 	if ai == nil || len(in) == 0 {
 		return "", nil
 	}
@@ -385,7 +650,10 @@ func buildGaokaoDeepSeekReviewAdvice(ctx context.Context, ai chatAIService, sear
 %s`, profile.Province, profile.Subjects, batchLabel, batchLabel, string(payload))
 	ctx2, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	queryText, err := callGaokaoAITextWithSearchContext(ctx2, ai, searchService, "deepseek-chat", []services.Message{{Role: "system", Content: "你是严谨的高考数据检索规划员，只返回 JSON。"}, {Role: "user", Content: queryPrompt}}, true)
+	queryMessages := []services.Message{{Role: "system", Content: "你是严谨的高考数据检索规划员，只返回 JSON。"}, {Role: "user", Content: queryPrompt}}
+	started := time.Now()
+	queryText, err := callGaokaoAITextWithSearchContext(ctx2, ai, searchService, "deepseek-v4-pro", queryMessages, true)
+	usageRecorder.record("deepseek-v4-pro", "gaokao_deepseek_query_generation", queryMessages, queryText, started)
 	if err != nil {
 		return "", err
 	}
@@ -418,7 +686,10 @@ GPT第一轮候选：
 %s
 联网搜索摘录：
 %s`, profile.Province, profile.Subjects, profile.Rank, string(payload), string(snippetsJSON))
-	verifyText, err := callGaokaoAITextWithSearchContext(ctx2, ai, searchService, "deepseek-chat", []services.Message{{Role: "system", Content: "你是严谨的高考志愿复核顾问，只返回 JSON。"}, {Role: "user", Content: verifyPrompt}}, true)
+	verifyMessages := []services.Message{{Role: "system", Content: "你是严谨的高考志愿复核顾问，只返回 JSON。"}, {Role: "user", Content: verifyPrompt}}
+	started = time.Now()
+	verifyText, err := callGaokaoAITextWithSearchContext(ctx2, ai, searchService, "deepseek-v4-pro", verifyMessages, true)
+	usageRecorder.record("deepseek-v4-pro", "gaokao_deepseek_verification", verifyMessages, verifyText, started)
 	if err != nil {
 		return "", err
 	}
@@ -441,7 +712,7 @@ func validateGaokaoCandidatesWithDeepSeekWeb(ctx context.Context, ai chatAIServi
 %s`, profile.Province, profile.Subjects, string(payload))
 	ctx2, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	queryText, err := callGaokaoAIText(ctx2, ai, "deepseek-chat", []services.Message{{Role: "system", Content: "你是严谨的高考数据检索规划员，只返回 JSON。"}, {Role: "user", Content: queryPrompt}})
+	queryText, err := callGaokaoAIText(ctx2, ai, "deepseek-v4-pro", []services.Message{{Role: "system", Content: "你是严谨的高考数据检索规划员，只返回 JSON。"}, {Role: "user", Content: queryPrompt}})
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +745,7 @@ func validateGaokaoCandidatesWithDeepSeekWeb(ctx context.Context, ai chatAIServi
 %s
 联网搜索摘录：
 %s`, profile.Province, profile.Subjects, profile.Rank, string(payload), string(snippetsJSON))
-	verifyText, err := callGaokaoAIText(ctx2, ai, "deepseek-chat", []services.Message{{Role: "system", Content: "你是严谨的高考数据审核员，只返回 JSON。"}, {Role: "user", Content: verifyPrompt}})
+	verifyText, err := callGaokaoAIText(ctx2, ai, "deepseek-v4-pro", []services.Message{{Role: "system", Content: "你是严谨的高考数据审核员，只返回 JSON。"}, {Role: "user", Content: verifyPrompt}})
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +872,7 @@ func validateGaokaoCandidatesWithDeepSeek(ctx context.Context, ai chatAIService,
 %s`, profile.Rank, profile.Province, profile.Subjects, string(payload))
 	ctx2, cancel := context.WithTimeout(ctx, 80*time.Second)
 	defer cancel()
-	text, err := callGaokaoAIText(ctx2, ai, "deepseek-chat", []services.Message{{Role: "system", Content: "你是严谨的数据审核员，只返回 JSON。"}, {Role: "user", Content: prompt}})
+	text, err := callGaokaoAIText(ctx2, ai, "deepseek-v4-pro", []services.Message{{Role: "system", Content: "你是严谨的数据审核员，只返回 JSON。"}, {Role: "user", Content: prompt}})
 	if err != nil || strings.TrimSpace(text) == "" {
 		return in
 	}
@@ -733,6 +1004,13 @@ DeepSeek 联网复核意见（只作为整改建议，不是最终表格；请�
 
 func buildGaokaoFinalAIPrompt(profile services.GaokaoProfile, message, track string, candidates []gaokaoAICandidate, links []services.GaokaoAdvisorEvidenceLink) string {
 	payload, _ := json.MarshalIndent(candidates, "", "  ")
+	isCollegeTrack := strings.Contains(track, "专科") || strings.EqualFold(track, "college")
+	tableColumns := "学校、城市、层次、2025参考最低位次、推荐专业、录取概率、保研率（约）、深造率（约）、就业特色、推荐指数"
+	collegeRule := ""
+	if isCollegeTrack {
+		tableColumns = "学校、城市、层次、2025参考最低位次、推荐专业、录取概率、专升本概率（约）、升学路径、就业特色、推荐指数"
+		collegeRule = "专科专项禁止出现保研率、推免率、保研、保送研究生等本科口径；如需升学指标，统一写专升本概率（约）和升学路径。"
+	}
 	var src strings.Builder
 	for i, l := range links {
 		if i >= 8 {
@@ -744,31 +1022,34 @@ func buildGaokaoFinalAIPrompt(profile services.GaokaoProfile, message, track str
 		}
 		fmt.Fprintf(&src, "- %s：%s\n", l.Title, l.URL)
 	}
-	return fmt.Sprintf(`请基于 validated_candidates 写一份完整《高考志愿规划报告》。
+	return fmt.Sprintf(`请基于下方已筛选院校清单写一份完整《高考志愿规划报告》。
 
 硬规则：
-1. 只能使用 validated_candidates 中的学校，严禁新增任何学校。
+1. 只能使用“已筛选院校清单”中的学校，严禁新增任何学校；但正文中不要出现“validated_candidates、已筛选院校清单、候选、模型、后端、JSON”等内部生产者话术。
 2. 进入%s专项，只写%s方案。
-3. 层次必须写清：985/211/双一流/公办一本/公办二本等。
-4. 表格列必须是：学校、城市、层次、2025参考最低位次、推荐专业、录取概率、保研率（约）、深造率（约）、就业特色、推荐指数。
+3. 层次必须写清：985/211/双一流/公办一本/公办二本/职业本科/专科/本科院校专科专业等。专科专项里，如果学校本身是本科院校但招生专业属于专科批，层次必须写“本科院校专科专业”；独立高职高专写“专科/高职高专”。
+4. 表格列必须是：%s。
+4.1 %s
 5. 不要出现“全国参考排名”这几个字；如需表达学校实力，只写“学校层次/院校特色”，录取相关只写“2025参考最低位次”。
 6. 学校最低位次口径：展示该校在本省本批次、符合选科的可报专业组/院校组中“收分最低、位次最大”的学校最低位次；不是专业最低位次，也不是学校排名。
 7. 如果 candidate 有 verified_min_rank，表格“2025参考最低位次”必须展示这个明确整数（如 31331），不得改写成区间、约数或大概值。
 8. 对录取概率/保研率/深造率标注“约/参考/经验估计，非官方概率”。
-9. 推荐专业的专业最低位次必须是该专业/专业组的真实去年最低录取位次；不能把学校最低位次复制给每个专业。没有查到专业级数据时，只写专业名称，不要声称专业最低位次。
-10. 禁止出现“很好录取”“稳录取”“包录取”“高概率”这类绝对化/口语化判断；只能写“极限冲/冲/临界稳/稳/保”和非官方概率。
-11. 必须包含冲刺项：冲刺学校的学校最低位次应优于考生当前位次但不要离谱，例如4万位考生应包含若干约3.3万-3.9万位学校；不能整表都是4万位以后/门槛更低的稳保。
-12. 写作风格参考专业志愿规划 Word 报告：考生基本情况、最终志愿推荐、院校优势概览、推荐专业排序、最终填报建议、免责声明。
+9. 推荐专业的专业最低位次必须是该专业/专业组的真实去年最低录取位次；不能把学校最低位次复制给每个专业。没有查到专业级数据时，只写专业名称，不要声称专业最低位次，也不要写“专业最低位次待核验”。
+10. 表格和正文不要直接写 URL、域名或括号来源码，例如不要写“218149 (6617.com)”；来源说明可概括为“考试院/高校招生网/公开资料”，具体链接交给来源区。
+11. 禁止出现“很好录取”“稳录取”“包录取”“高概率”这类绝对化/口语化判断；只能写“极限冲/冲/临界稳/稳/保”和非官方概率。
+12. 必须包含冲刺项：冲刺学校的学校最低位次应优于考生当前位次但不要离谱；不能整表都是考生位次以后/门槛更低的稳保。
+13. 专科专项的推荐结构优先写成“冲刺 6 所 + 临界稳 6 所 + 稳妥 8 所 + 保底 8 所”；如果已筛选院校不足 28 所，必须说明为“按当前可用数据优先覆盖四个梯度”，但不要暴露内部候选/JSON说法。
+14. 写作风格参考专业志愿规划 Word 报告：考生基本情况、最终志愿推荐、院校优势概览、推荐专业排序、最终填报建议、免责声明。
 
 考生：%s，%s，%d分，位次%d。
 专业偏好：%s。
 用户补充：%s。
 
-validated_candidates JSON：
+已筛选院校清单 JSON（仅供你内部参考，禁止把这个标题写进报告正文）：
 %s
 
 可复核来源：
-%s`, track, track, profile.Province, profile.Subjects, profile.Score, profile.Rank, strings.Join(profile.PreferredMajors, "、"), message, string(payload), src.String())
+%s`, track, track, tableColumns, collegeRule, profile.Province, profile.Subjects, profile.Score, profile.Rank, strings.Join(profile.PreferredMajors, "、"), message, string(payload), src.String())
 }
 
 func validateGaokaoFinalMarkdown(profile services.GaokaoProfile, md string, candidates []gaokaoAICandidate) error {

@@ -47,7 +47,7 @@ function loadModule(file) {
           if (justCreatedConversationId === conversationId) return { kind: "just_created", shouldClearJustCreated: true, conversationId, loadingHistory: false, loadedPersistedMessages: 0, totalMessages: 0 };
           return { kind: "load_existing", conversationId, shouldSetLoadingHistory: true, loadingHistory: true, shouldSetCurrentConversation: true, abortPlan: { shouldAbortMain: hasMainAbortController, shouldAbortCompare: compareAbortControllerCount > 0, abortReason: (hasMainAbortController || compareAbortControllerCount > 0) ? "navigation" : null } };
         },
-        shouldContinueConversationRestore: ({ token, loadAborted }) => Boolean(token) && !loadAborted,
+        shouldContinueConversationRestore: ({ loadAborted }) => !loadAborted,
       };
     }
     if (specifier === "@/lib/chatConversationRestoreCoordinator") {

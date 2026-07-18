@@ -103,20 +103,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// 生成短期 access token，并签发长期 refresh cookie
-	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
-		return
-	}
+	// 签发长期 HttpOnly Cookie session。Web 前端不再接收/保存 access token。
 	if err := h.issueRefreshToken(c, h.db, user.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建登录会话失败"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"user":  authUserPayload(user, defaultWorkspace.ID),
-		"token": token,
+		"user": authUserPayload(user, defaultWorkspace.ID),
 	})
 }
 
@@ -140,12 +134,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "邮箱或密码错误"})
 		return
 	}
-	// 生成短期 access token，并签发长期 refresh cookie
-	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
-		return
-	}
+	// 签发长期 HttpOnly Cookie session。Web 前端不再接收/保存 access token。
 	if err := h.issueRefreshToken(c, h.db, user.ID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建登录会话失败"})
 		return
@@ -156,8 +145,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
 
 	c.JSON(http.StatusOK, gin.H{
-		"user":  authUserPayload(user, defaultWS.ID),
-		"token": token,
+		"user": authUserPayload(user, defaultWS.ID),
 	})
 }
 
@@ -182,15 +170,9 @@ func (h *AuthHandler) Session(c *gin.Context) {
 		return
 	}
 
-	token, err := generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成 token 失败"})
-		return
-	}
-
 	var defaultWS models.Workspace
 	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
-	c.JSON(http.StatusOK, gin.H{"token": token, "user": authUserPayload(user, defaultWS.ID)})
+	c.JSON(http.StatusOK, gin.H{"user": authUserPayload(user, defaultWS.ID)})
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {
@@ -212,14 +194,8 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	var token string
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.RefreshToken{}).Where("id = ? AND revoked_at IS NULL", stored.ID).Update("revoked_at", now).Error; err != nil {
-			return err
-		}
-		var err error
-		token, err = generateAccessToken(user.ID, user.Email, h.cfg.JWTSecret)
-		if err != nil {
 			return err
 		}
 		return h.issueRefreshToken(c, tx, user.ID)
@@ -230,7 +206,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	var defaultWS models.Workspace
 	h.db.Where("user_id = ? AND is_default = ?", user.ID, true).First(&defaultWS)
-	c.JSON(http.StatusOK, gin.H{"token": token, "user": authUserPayload(user, defaultWS.ID)})
+	c.JSON(http.StatusOK, gin.H{"user": authUserPayload(user, defaultWS.ID)})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {

@@ -47,6 +47,25 @@ function shouldSkipViewportObserversForAssistant(content?: string) {
   return !weight.hasCodeFence && !weight.hasTableLine;
 }
 
+function isStoppedSystemNotice(content?: string) {
+  const text = (content || "").trim();
+  return text === "生成已停止" || text === "生成已中断，可以重新生成这条回答。" || text === "Generation was interrupted. You can regenerate this reply.";
+}
+
+function hasVisibleStoppedContent(message: Message, runtimeState: ReturnType<typeof resolveChatMessageRuntimeState>) {
+  const values = [
+    message.content,
+    message.reasoningContent,
+    runtimeState.content,
+    runtimeState.answerContent,
+    runtimeState.reasoningContent,
+  ];
+  return values.some((value) => {
+    const text = (value || "").trim();
+    return Boolean(text && !isStoppedSystemNotice(text));
+  });
+}
+
 export type MessageRowProps = {
   message: Message;
   displayMessageId?: string;
@@ -163,6 +182,8 @@ function MessageRow({
   const blockRichTextHydration = historyPrependSettling || (deferRichTextHydration && !canBypassBrowsingHydrationDefer);
   const forceStableRichLiteFallback = blockRichTextHydration || stabilizeInitialRichText || (forceHydrateRichText && !isInViewport);
   const isGenerating = !isUser && assistantGenerationState.isGenerating;
+  const hasStoppedVisibleContent = hasVisibleStoppedContent(msg, runtimeState);
+  const isStoppedEmptyAssistant = !isUser && Boolean(msg.stopped && !hasStoppedVisibleContent);
   const assistantFailureMessage = { ...msg, content: runtimeState.content || msg.content, errorCode: runtimeState.errorCode || msg.errorCode, phase: runtimeState.phase };
   const isAssistantFailure = !isUser && isAssistantFailureState(assistantFailureMessage);
   const isEmptyPendingAssistant = !isUser && isGenerating && !realtimeHasVisiblePayload && !msg.content?.trim() && !msg.reasoningContent?.trim() && !runtimeState.terminal;
@@ -341,7 +362,7 @@ function MessageRow({
       style={!isUser && useContentVisibility && !isGenerating && Boolean(msg.content?.trim() || msg.completedAt) && (msg.content?.length || 0) > 2000 ? MESSAGE_ROW_CONTENT_VISIBILITY_STYLE : undefined}
       className={cn(CHAT_MESSAGE_ROW_CLASS, "py-4 rounded-2xl", isHighlighted && "bg-brand/10")}
     >
-      <div className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
+      {!isStoppedEmptyAssistant && <div className={cn("flex gap-3 group", !suppressAppearAnimation && "animate-message-appear", isUser ? "justify-end" : "justify-start")}>
         <div className={cn("mt-1 shrink-0", isUser && !selectMode ? "w-7 invisible" : "w-7")}>
           {!isUser && !selectMode && (
             <div className="relative">
@@ -465,7 +486,6 @@ function MessageRow({
                   <UserMessageContent
                     message={msg}
                     imageLoadFailedLabel={imageLoadFailedLabel}
-                    onRetry={onRetryUserMessage ? () => onRetryUserMessage(msg) : undefined}
                     onEditRequest={canEditUserMessage ? () => { setEditDraft(msg.content || ""); setEditError(null); setIsEditingUserMessage(true); } : undefined}
                   />
                 )
@@ -488,11 +508,13 @@ function MessageRow({
               <MessageActions
                 onCopy={() => handleCopy(msg.content)}
                 onEdit={canEditUserMessage ? () => { setEditDraft(msg.content || ""); setEditError(null); setIsEditingUserMessage(true); } : undefined}
+                onRetry={isLocalFailedUserMessage && onRetryUserMessage ? () => onRetryUserMessage(msg) : undefined}
                 onRegenerate={onRegenerate}
                 onShareSelectMode={() => enterSelectMode("share", msg.id)}
                 onFavoriteSelectMode={msg.serverMessageId && conversationId ? () => enterSelectMode("favorite", msg.id) : undefined}
                 isFavorited={msg.serverMessageId ? isFavorited(msg.serverMessageId) : false}
                 showRegenerate={canRegenerate}
+                showRetry={isLocalFailedUserMessage}
                 align={isUser ? "right" : "left"}
                 visible={isLast}
                 createdAt={msg.createdAt}
@@ -524,7 +546,14 @@ function MessageRow({
             </button>
           )}
         </div>
-      </div>
+      </div>}
+      {msg.stopped && !isUser && (
+        <div className="mt-3 flex w-full items-center gap-3" data-testid="chat-stopped-divider">
+          <div className="h-px min-w-8 flex-1 bg-slate-300 dark:bg-slate-600" />
+          <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">{t("chat.stopped.info")}</span>
+          <div className="h-px min-w-8 flex-1 bg-slate-300 dark:bg-slate-600" />
+        </div>
+      )}
     </div>
   );
 }

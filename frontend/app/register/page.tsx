@@ -7,6 +7,7 @@ import { Loader2, Sparkles } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getErrorMessage, readApiError } from "@/lib/errors";
 import { sendAuthEmailCode } from "@/lib/authEmailCode";
+import { applyAuthSession } from "@/lib/auth/state";
 import { toast } from "sonner";
 
 export default function RegisterPage() {
@@ -75,11 +76,8 @@ export default function RegisterPage() {
       if (!res.ok) throw await readApiError(res);
       const data = await res.json();
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-      if (data.user?.default_workspace_id) localStorage.setItem("current-workspace", String(data.user.default_workspace_id));
+      applyAuthSession({ user: data.user });
       import("@/lib/guestId").then(({ clearGuestId }) => clearGuestId());
-      window.dispatchEvent(new Event("auth-changed"));
       if (data.user?.beta_phase === "" || data.user?.beta_phase === null || data.user?.beta_phase === undefined) {
         router.push("/beta/activate");
       } else {

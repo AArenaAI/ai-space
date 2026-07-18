@@ -84,21 +84,13 @@ func TestAuthSessionReturnsUserForValidRefreshCookie(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Token == "" {
-		t.Fatalf("session response must include a fresh access token")
-	}
-	claims, err := parseAccessToken(payload.Token, "test-secret")
-	if err != nil {
-		t.Fatalf("parse session token: %v", err)
-	}
-	if claims.UserID != user.ID || claims.Email != user.Email {
-		t.Fatalf("unexpected token claims: %+v", claims)
+	if payload.Token != "" {
+		t.Fatalf("session response must not include browser-readable access token")
 	}
 	if payload.User.ID != user.ID || payload.User.Email != user.Email || payload.User.DefaultWorkspaceID != workspace.ID {
 		t.Fatalf("unexpected user payload: %+v", payload.User)
 	}
 }
-
 
 func TestAuthSessionUsesValidCookieWhenLegacyApiCookieComesFirst(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -128,7 +120,6 @@ func TestAuthSessionUsesValidCookieWhenLegacyApiCookieComesFirst(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
-
 
 func TestAuthSessionAcceptsLegacyRefreshCookieName(t *testing.T) {
 	gin.SetMode(gin.TestMode)

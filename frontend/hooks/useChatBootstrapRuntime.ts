@@ -44,9 +44,6 @@ function applyBootstrapClientSideEffects(payload: ChatBootstrapPayload, setChatB
   if (payload.user) {
     localStorage.setItem("user", JSON.stringify(payload.user));
   }
-  if (payload.token) {
-    localStorage.setItem("token", payload.token);
-  }
   if (payload.workspace?.current_id) {
     localStorage.setItem("current-workspace", String(payload.workspace.current_id));
   }

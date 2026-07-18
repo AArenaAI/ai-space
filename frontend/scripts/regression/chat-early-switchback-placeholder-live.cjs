@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 async function apiJson(baseUrl, path, token, init = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -52,9 +52,9 @@ async function sample(page, label) {
   const returnDelayMs = Number(env('EARLY_RETURN_MS', '350'));
   const auth = await login({ baseUrl });
   const stamp = Date.now();
-  const convA = await createConversation(baseUrl, auth.token, `Early switch A ${stamp}`, model);
-  const convB = await createConversation(baseUrl, auth.token, `Early switch B ${stamp}`, model);
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const convA = await createConversation(baseUrl, auth, `Early switch A ${stamp}`, model);
+  const convB = await createConversation(baseUrl, auth, `Early switch B ${stamp}`, model);
+  const { browser, page } = await openAuthedPage({ baseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/chat') || u.includes('/api/tasks/')) events.responses.push({ status: res.status(), url: u }); });
@@ -87,7 +87,7 @@ async function sample(page, label) {
       await page.waitForTimeout(waitMs);
       samples.push(await sample(page, label));
     }
-    const boot = await apiJson(baseUrl, `/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth.token);
+    const boot = await apiJson(baseUrl, `/api/chat/bootstrap?id=${convA.id}&message_tail=32&conversation_limit=30`, auth);
     const latest = [...(boot.snapshot?.messages || [])].reverse().find((m) => m.role === 'assistant');
     const anyServerBoundAssistant = samples.some((s) => s.latestAssistant && (s.latestAssistant.serverId || s.latestAssistant.taskId || /^\d+$/.test(String(s.latestAssistant.id || ''))));
     const result = {

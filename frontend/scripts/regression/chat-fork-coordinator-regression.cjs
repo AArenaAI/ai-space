@@ -108,6 +108,10 @@ function response(ok, data) {
       phase: undefined,
       statusTimeline: undefined,
       tokensUsed: undefined,
+      clientMessageId: undefined,
+      localRunId: undefined,
+      sendStatus: undefined,
+      stopped: undefined,
     });
   });
 

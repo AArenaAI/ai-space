@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const assert = require('node:assert/strict');
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 
 const apiBaseUrl = (env('USER_EDIT_API_BASE_URL', env('TESTNET_BASE_URL', 'http://127.0.0.1:19091')) || '').replace(/\/+$/, '');
 const frontendBaseUrl = (env('USER_EDIT_FRONTEND_BASE_URL', 'http://127.0.0.1:3000') || '').replace(/\/+$/, '');
@@ -22,7 +22,7 @@ function redact(value) {
 async function apiJson(path, token, init = {}) {
   const res = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -79,7 +79,7 @@ async function sampleRows(page) {
     assert.equal(frontendHealth.ok, true, `frontend health ${frontendHealth.status}`);
 
     auth = await login({ baseUrl: apiBaseUrl });
-    conversation = await apiJson('/api/conversations', auth.token, {
+    conversation = await apiJson('/api/conversations', auth, {
       method: 'POST',
       body: JSON.stringify({ title: `user edit live ${stamp}`, model }),
     });
@@ -87,7 +87,7 @@ async function sampleRows(page) {
 
     const { browser: openedBrowser, page } = await openAuthedPage({
       baseUrl: frontendBaseUrl,
-      token: auth.token,
+      auth,
       user: auth.user,
       sessionToken: auth.sessionToken,
       refreshToken: auth.refreshToken,
@@ -157,7 +157,7 @@ async function sampleRows(page) {
     assert.equal(report.afterEdit.stopButtons, 0, 'stop button should be gone after completion');
     assert.equal(report.afterEdit.pendingShells, 0, 'pending shell should be gone after completion');
 
-    const bootstrapAfterEdit = await apiJson(`/api/chat/bootstrap?id=${conversation.id}&message_tail=16&conversation_limit=20`, auth.token);
+    const bootstrapAfterEdit = await apiJson(`/api/chat/bootstrap?id=${conversation.id}&message_tail=16&conversation_limit=20`, auth);
     const persistedMessages = bootstrapAfterEdit.snapshot?.messages || [];
     report.persistedAfterEdit = persistedMessages.map((msg) => ({ id: msg.id, role: msg.role, content: (msg.content || '').slice(0, 300), generation_status: msg.generation_status, generation_task_id: msg.generation_task_id }));
     assert.equal(persistedMessages.filter((msg) => msg.role === 'user').length, 1, 'persisted should have one user row');
@@ -186,7 +186,7 @@ async function sampleRows(page) {
   } finally {
     await browser?.close().catch(() => {});
     if (conversation?.id && auth?.token) {
-      report.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] }).catch((error) => ({ error: error.message }));
+      report.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] }).catch((error) => ({ error: error.message }));
     }
   }
   printResult(report);

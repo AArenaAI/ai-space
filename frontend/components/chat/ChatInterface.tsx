@@ -710,7 +710,7 @@ export default function ChatInterface({ conversationId, notebookId, notebookTitl
           onContinueGenerate={regenerateMessage}
           onRetryUserMessage={retryUserMessage}
           onEditUserMessage={editUserMessage}
-          canEditUserMessages={!activeCompareMode && !isLoading && !isCurrentConversationGenerating}
+          canEditUserMessages={!isLoading && !isCurrentConversationGenerating}
           isCompare={activeCompareMode}
           compareModels={activeCompareModelIds}
           onCompareModelChange={handleCompareModelChange}

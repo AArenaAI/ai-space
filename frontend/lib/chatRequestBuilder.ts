@@ -47,6 +47,9 @@ export type CommonChatRequestOptions = {
 export type SingleChatRequestOptions = CommonChatRequestOptions & {
   skipSaveUserMessage?: boolean;
   userMessageId?: number;
+  clientMessageId?: string;
+  localRunId?: string;
+  sendStatus?: string;
 };
 
 export function buildSingleChatRequestBody({
@@ -63,6 +66,9 @@ export function buildSingleChatRequestBody({
   notebookFileIds,
   clientTimezone,
   userMessageId,
+  clientMessageId,
+  localRunId,
+  sendStatus,
 }: SingleChatRequestOptions): Record<string, any> {
   return {
     model,
@@ -75,6 +81,9 @@ export function buildSingleChatRequestBody({
     template_id: templateId,
     skip_save_user_msg: skipSaveUserMessage,
     ...(userMessageId ? { user_message_id: userMessageId } : {}),
+    client_message_id: clientMessageId || undefined,
+    local_run_id: localRunId || undefined,
+    send_status: sendStatus || undefined,
     skill_key: skillKey || undefined,
     message_file_ids: messageFileIds || undefined,
     notebook_file_ids: notebookFileIds || undefined,

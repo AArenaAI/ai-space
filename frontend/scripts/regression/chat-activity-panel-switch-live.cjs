@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 function parseSseDataChunk(raw) {
   return raw.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trimStart()).join('\n');
@@ -8,7 +8,7 @@ function parseSseDataChunk(raw) {
 async function createConversation(baseUrl, token, title, model) {
   const res = await fetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({ title, model }),
   });
   const text = await res.text();
@@ -20,7 +20,7 @@ async function startAndInterruptReasoning({ baseUrl, token, conversationId, mode
   const prompt = env('ACTIVITY_SWITCH_PROMPT', '请联网搜索一个最新AI产品新闻，然后先进行较长中文思考，分三段分析背景、影响和风险，最后只给一句简短总结。');
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({
       model,
       conversation_id: conversationId,
@@ -90,11 +90,11 @@ async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
   const model = env('ACTIVITY_SWITCH_MODEL', env('REAL_CHAT_MODEL', 'deepseek-v4-pro'));
   const auth = await login({ baseUrl });
-  const conversationA = await createConversation(baseUrl, auth.token, `Activity switch A ${Date.now()}`, model);
-  const conversationB = await createConversation(baseUrl, auth.token, `Activity switch B ${Date.now()}`, model);
-  const interrupted = await startAndInterruptReasoning({ baseUrl, token: auth.token, conversationId: conversationA.id, model });
+  const conversationA = await createConversation(baseUrl, auth, `Activity switch A ${Date.now()}`, model);
+  const conversationB = await createConversation(baseUrl, auth, `Activity switch B ${Date.now()}`, model);
+  const interrupted = await startAndInterruptReasoning({ baseUrl, auth, conversationId: conversationA.id, model });
 
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { requests: [], responses: [], console: [], errors: [] };
   page.on('request', (req) => { const u = req.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.requests.push({ method: req.method(), url: u }); });
   page.on('response', (res) => { const u = res.url(); if (u.includes('/api/tasks/') || u.includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: u }); });
@@ -118,7 +118,7 @@ async function samplePanelReasoning(page, count = 20, intervalMs = 80) {
   const afterSwitch = await samplePanelReasoning(page, 24, 80);
   const panelText = await page.locator('[data-chat-activity-panel="true"]').innerText().catch(() => '');
   const finalTaskSnapshot = await fetch(`${baseUrl}/api/tasks/${interrupted.task.id}`, {
-    headers: { Authorization: `Bearer ${auth.token}` },
+    headers: { ...authHeaders(auth) },
   }).then((res) => res.ok ? res.json() : undefined).catch(() => undefined);
   await browser.close();
 

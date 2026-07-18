@@ -154,7 +154,7 @@ export async function fetchConversationRestore({
   retry429?: boolean;
   max429Retries?: number;
 }): Promise<ConversationRestoreResponse> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   if (snapshotVersion) headers["If-None-Match"] = snapshotVersion;
   const url = buildChatBootstrapUrl({ apiBaseUrl, conversationId, messageTail: DEFAULT_CONVERSATION_RESTORE_TAIL, conversationLimit: 30 });
   let attempt = 0;
@@ -214,7 +214,7 @@ export async function fetchConversationMessageStatus({
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<ConversationRestoreStatusResponse | undefined> {
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const isBrowserSameOriginApi = typeof window !== "undefined"
     && fetchImpl === fetch
     && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);
@@ -237,7 +237,7 @@ export async function fetchConversationMessageCount({
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<number | undefined> {
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const isBrowserSameOriginApi = typeof window !== "undefined"
     && fetchImpl === fetch
     && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);

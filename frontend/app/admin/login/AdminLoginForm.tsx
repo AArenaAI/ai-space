@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LockKeyhole, ShieldCheck } from "lucide-react";
 import { clearAdminSession, getAdminMe, storeAdminSession } from "@/lib/admin/api";
+import { applyAuthSession } from "@/lib/auth/state";
 import { readApiError } from "@/lib/errors";
 import type { ApiErrorPayload } from "@/lib/errors";
 
@@ -46,15 +47,14 @@ export default function AdminLoginForm() {
       });
       if (!response.ok) throw await readApiError(response);
       const data = await response.json();
-      if (!data?.token) throw new Error("登录响应缺少 token");
 
-      storeAdminSession(data.token, data.user);
+      applyAuthSession({ user: data.user });
       const { user } = await getAdminMe();
       if (user.role !== "admin") {
         clearAdminSession();
         throw new Error("当前账号没有后台管理员权限");
       }
-      storeAdminSession(data.token, user);
+      storeAdminSession(null, user);
       router.replace(returnUrl);
     } catch (err) {
       setError(getAdminLoginErrorMessage(err));

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
+const { authHeaders, cleanupConversations, env, login, openAuthedPage, printResult, summarizeConsole } = require('./chat-live-utils.cjs');
 const { chromium } = require('playwright');
 
 async function jsonFetch(url, options = {}) {
@@ -14,7 +14,7 @@ async function jsonFetch(url, options = {}) {
 async function createConversation(baseUrl, token, model) {
   return jsonFetch(`${baseUrl}/api/conversations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify({ title: `Placeholder jitter probe ${Date.now()}`, model }),
   });
 }
@@ -410,10 +410,10 @@ function analyzeRound(samples) {
   const settleMs = Math.max(300, Number(env('JITTER_SETTLE_SAMPLE_MS', scenario === 'short' ? '1200' : '3500')));
   const intervalMs = Math.max(30, Number(env('JITTER_INTERVAL_MS', '50')));
   const auth = await login({ baseUrl: apiBaseUrl });
-  const conversation = await createConversation(apiBaseUrl, auth.token, model);
+  const conversation = await createConversation(apiBaseUrl, auth, model);
   const { browser, page } = await openAuthedPage({
     baseUrl: frontendBaseUrl,
-    token: auth.token,
+    auth,
     user: auth.user,
     sessionToken: auth.sessionToken,
     refreshToken: auth.refreshToken,
@@ -498,7 +498,7 @@ function analyzeRound(samples) {
     pageErrors,
   };
   if (env('KEEP_LIVE_CONVERSATIONS') !== '1') {
-    result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, token: auth.token, conversationIds: [conversation.id] }).catch((error) => [{ ok: false, error: error.message }]);
+    result.cleanup = await cleanupConversations({ baseUrl: apiBaseUrl, auth, conversationIds: [conversation.id] }).catch((error) => [{ ok: false, error: error.message }]);
   }
   printResult(result);
   if (!result.ok) process.exit(2);

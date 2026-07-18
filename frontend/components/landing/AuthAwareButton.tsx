@@ -9,6 +9,7 @@ interface AuthAwareButtonProps {
   className?: string;
   variant?: "primary" | "secondary" | "text";
   icon?: React.ReactNode;
+  href?: string;
 }
 
 export function showLoginModal() {
@@ -22,11 +23,16 @@ export default function AuthAwareButton({
   className,
   variant = "primary",
   icon,
+  href,
 }: AuthAwareButtonProps) {
   const router = useRouter();
   const auth = useAuth();
 
   const handleClick = () => {
+    if (href) {
+      router.push(href);
+      return;
+    }
     if (auth.status === "authenticated") {
       router.push("/chat");
     } else {

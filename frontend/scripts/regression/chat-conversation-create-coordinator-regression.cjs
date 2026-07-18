@@ -99,10 +99,10 @@ async function test(name, fn) {
     );
   });
 
-  await test("shouldCreateConversation requires token", () => {
+  await test("shouldCreateConversation allows cookie-session creation without local token", () => {
     assert.equal(shouldCreateConversation({ token: "tok" }), true);
-    assert.equal(shouldCreateConversation({ token: "" }), false);
-    assert.equal(shouldCreateConversation({ token: null }), false);
+    assert.equal(shouldCreateConversation({ token: "" }), true);
+    assert.equal(shouldCreateConversation({ token: null }), true);
   });
 
   console.log("\nchat conversation create coordinator regression tests passed");

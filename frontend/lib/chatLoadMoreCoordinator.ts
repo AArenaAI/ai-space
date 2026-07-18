@@ -28,14 +28,13 @@ export function shouldStartLoadMore({
   currentConversation,
   isLoadingMore,
   hasMoreMessages,
-  token,
 }: {
   currentConversation?: number;
   isLoadingMore: boolean;
   hasMoreMessages: boolean;
   token: string | null;
 }): boolean {
-  return Boolean(currentConversation && !isLoadingMore && hasMoreMessages && token);
+  return Boolean(currentConversation && !isLoadingMore && hasMoreMessages);
 }
 
 export function buildLoadMorePage({
@@ -75,11 +74,11 @@ export async function fetchLoadMoreMessages({
 }: {
   apiBaseUrl?: string;
   conversationId: number;
-  token: string;
+  token?: string | null;
   page: Pick<LoadMorePage, "requestLimit" | "offset">;
   fetchImpl?: typeof fetch;
 }): Promise<LoadMoreResponse | undefined> {
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const isBrowserSameOriginApi = typeof window !== "undefined"
     && fetchImpl === fetch
     && (!apiBaseUrl || apiBaseUrl.replace(/\/+$/, "") === window.location.origin);

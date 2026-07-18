@@ -489,11 +489,11 @@ function analyzeOfflineTokenBlocksByCid(messagesByCid, limit = 12) {
   );
 }
 
-async function fetchLatestAssistantMessages(token, cids) {
+async function fetchLatestAssistantMessages(auth, cids) {
   const result = {};
   for (const cid of [...new Set(cids)]) {
     const response = await fetch(`${apiBaseUrl}/api/conversations/${cid}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: auth.cookieHeader ? { Cookie: auth.cookieHeader } : {},
     });
     if (!response.ok) continue;
     const data = await response.json();
@@ -532,7 +532,11 @@ async function login() {
   });
   if (!response.ok) throw new Error(`login ${response.status}: ${await response.text()}`);
   const data = await response.json();
-  return { token: data.token || data.access_token || data.accessToken, user: data.user || data.data?.user || { email } };
+  const setCookie = response.headers.get("set-cookie") || "";
+  const sessionToken = setCookie.match(/ai_space_session=([^;,]+)/)?.[1] || "";
+  const refreshToken = setCookie.match(/ai_space_refresh_token=([^;,]+)/)?.[1] || "";
+  const cookieHeader = [sessionToken ? `ai_space_session=${sessionToken}` : "", refreshToken ? `ai_space_refresh_token=${refreshToken}` : ""].filter(Boolean).join("; ");
+  return { sessionToken, refreshToken, cookieHeader, user: data.user || data.data?.user || { email } };
 }
 
 async function clickConversationAndMeasure(page, cid) {
@@ -827,12 +831,20 @@ function summarize(allResults, latestAssistantMessagesByCid = {}) {
 (async () => {
   const server = await createProxy();
   try {
-    const { token, user } = await login();
-    const latestAssistantMessagesByCid = await fetchLatestAssistantMessages(token, sequence);
+    const auth = await login();
+    const user = auth.user;
+    const latestAssistantMessagesByCid = await fetchLatestAssistantMessages(auth, sequence);
     const browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    await page.addInitScript(({ token, user, port }) => {
-      localStorage.setItem("token", token);
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const domain = new URL(baseUrl).hostname;
+    const cookies = [];
+    if (auth.sessionToken) cookies.push({ name: "ai_space_session", value: auth.sessionToken, domain, path: "/", httpOnly: true, secure: baseUrl.startsWith("https:"), sameSite: "Lax" });
+    if (auth.refreshToken) cookies.push({ name: "ai_space_refresh_token", value: auth.refreshToken, domain, path: "/", httpOnly: true, secure: baseUrl.startsWith("https:"), sameSite: "Lax" });
+    if (cookies.length) await context.addCookies(cookies);
+    const page = await context.newPage();
+    await page.addInitScript(({ user, port }) => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("admin_token");
       localStorage.setItem("user", JSON.stringify(user || {}));
       window.__chatRenderProfileEvents = [];
       window.__AI_SPACE_CHAT_PROFILE_ENABLED = true;
@@ -861,7 +873,7 @@ function summarize(allResults, latestAssistantMessagesByCid = {}) {
           throw error;
         }
       };
-    }, { token, user, port: proxyPort });
+    }, { user, port: proxyPort });
 
     const allResults = [];
     for (let run = 1; run <= runs; run += 1) {

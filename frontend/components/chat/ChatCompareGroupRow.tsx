@@ -24,6 +24,8 @@ export type ChatCompareGroupRowProps = {
   imageLoadFailedLabel: string;
   MarkdownRenderer: MarkdownRendererComponent;
   onCopy: (content: string) => void;
+  canEditUserMessage?: boolean;
+  onEditUserMessage?: (message: Message, content: string) => Promise<void>;
   onRegenerate?: () => void;
   onContinueGenerate?: () => void;
   onShareSelectMode: (id: string) => void;
@@ -61,6 +63,8 @@ function ChatCompareGroupRow({
   imageLoadFailedLabel,
   MarkdownRenderer,
   onCopy,
+  canEditUserMessage,
+  onEditUserMessage,
   onRegenerate,
   onContinueGenerate,
   onShareSelectMode,
@@ -101,7 +105,13 @@ function ChatCompareGroupRow({
       data-message-role="user"
     >
       <div className="mb-4 pl-10 pr-0">
-        <CompareSharedPromptBlock message={group.userMessage} imageLoadFailedLabel={imageLoadFailedLabel} />
+        <CompareSharedPromptBlock
+          message={group.userMessage}
+          imageLoadFailedLabel={imageLoadFailedLabel}
+          canEdit={canEditUserMessage}
+          isLoading={isLoading}
+          onEditUserMessage={onEditUserMessage}
+        />
       </div>
       <div className="grid grid-cols-1 items-stretch gap-5 lg:grid-cols-2 lg:gap-8 xl:gap-10" data-chat-compare-columns="true">
         {columnModels.map((modelId, colIndex) => {

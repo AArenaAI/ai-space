@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, FileText, Loader2, MoreVertical, Plus, AlertCircle, CheckCircle2, Clock3, Check, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
+import { ArrowLeft, FileText, Loader2, MoreVertical, Plus, AlertCircle, CheckCircle2, Clock3, Check, GraduationCap, ImageIcon, Upload, Trash2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import ChatInterface from "@/components/chat/ChatInterface";
 import { NotebookSourcePreviewDrawer } from "@/components/notebook/NotebookSourcePreviewDrawer";
@@ -1807,9 +1807,18 @@ function NotebookDetailContent() {
     <div ref={layoutRef} className="flex h-full min-h-0 gap-2 overflow-hidden bg-surface-elevated p-3 text-text-primary">
       <aside className="flex h-full shrink-0 flex-col overflow-hidden rounded-[28px] border border-surface-border bg-surface-card shadow-sm" style={{ width: sourcesWidth }}>
         <div className="border-b border-surface-border px-5 py-4">
-          <Link href="/notebooks" className="mb-4 inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
-            <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
-          </Link>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Link href="/notebooks" className="inline-flex items-center gap-2 text-xs font-medium text-text-tertiary transition hover:text-text-primary">
+              <ArrowLeft className="h-3.5 w-3.5" />{t("notebook.back")}
+            </Link>
+            <Link
+              href="/gaokao-volunteer"
+              className="inline-flex items-center gap-1.5 rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-600 transition hover:border-blue-500/35 hover:bg-blue-500/15 dark:text-blue-300"
+            >
+              <GraduationCap className="h-3.5 w-3.5" />
+              AI 高考志愿
+            </Link>
+          </div>
           <div className="min-w-0">
             <button onClick={handleRename} disabled={!writableNotebookId} className="block max-w-full truncate text-left text-[15px] font-medium leading-5 text-text-primary hover:text-brand disabled:cursor-default disabled:hover:text-text-primary">{notebook?.title || t("notebook.untitled")}</button>
             <p className="mt-1 text-xs text-text-tertiary">{t("notebook.readyCount").replace("{ready}", String(readyCount)).replace("{total}", String(files.length))}</p>

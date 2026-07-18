@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 async function apiJson(url, token, init = {}) {
   const res = await fetch(url, {
     ...init,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token), ...(init.headers || {}) },
   });
   const text = await res.text();
   let data = null;
@@ -39,10 +39,10 @@ async function clickConversation(page, id, delayMs = 0) {
   const stamp = Date.now();
   const conversations = [];
   for (let i = 0; i < 3; i += 1) {
-    conversations.push(await createConversation(baseUrl, auth.token, `Bootstrap 429 Probe ${stamp}-${i}`, model));
+    conversations.push(await createConversation(baseUrl, auth, `Bootstrap 429 Probe ${stamp}-${i}`, model));
   }
 
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const responses = [];
   const failed = [];
   const consoleMessages = [];

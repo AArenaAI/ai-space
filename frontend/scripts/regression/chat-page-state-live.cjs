@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-const { env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
+const { authHeaders, env, login, openAuthedPage, summarizeConsole, printResult } = require('./chat-live-utils.cjs');
 
 (async () => {
   const baseUrl = env('TESTNET_BASE_URL', 'https://testnet.ai-space.xyz');
   const missingId = Number(env('TESTNET_MISSING_CONVERSATION_ID') || 99999999);
   const auth = await login({ baseUrl });
-  const { browser, page } = await openAuthedPage({ baseUrl, token: auth.token, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
+  const { browser, page } = await openAuthedPage({ baseUrl, auth, user: auth.user, sessionToken: auth.sessionToken, refreshToken: auth.refreshToken });
   const events = { responses: [], console: [], errors: [] };
   page.on('response', (res) => { if (res.url().includes('/api/chat/bootstrap')) events.responses.push({ status: res.status(), url: res.url() }); });
   page.on('console', (msg) => events.console.push({ type: msg.type(), text: msg.text().slice(0, 300) }));
